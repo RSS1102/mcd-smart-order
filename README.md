@@ -54,21 +54,38 @@ export MCD_MCP_TOKEN="<你的 MCP Token>"
 在 WorkBuddy 中使用：左侧栏「专家·技能·连接器」→「连接器」→ 右上角「自定义连接器」→「配置 MCP」，
 填入 `mcp-config.example.json` 的内容并把 `${MCD_MCP_TOKEN}` 换成实际 Token，保存后启用 `mcd-mcp`。
 
-### 命令
+### 作为 Skill 使用（正常方式）
+
+什么都不用预设，直接对话。门店和取餐时间由**你在对话中提供**：
+
+> **你**：我在深圳科技园，帮我点个麦当劳，今晚 6 点自提
+>
+> **助手**：调用 `query-nearby-stores` 列出附近门店 → 你挑一家
+> 　　　　再原样列出该店的 `reservationTimeOptions` → 你挑一个时段
+
+地址、时间**不是脚本入参**，是 Agent 问出来、你选出来的。完整规则见 [`SKILL.md`](./SKILL.md)。
+
+### 命令（开发验证用）
 
 ```bash
 npm run typecheck     # 类型检查（strict）
 npm run test          # 62 项单元测试，基于真实门店快照，离线可跑
 npm run build         # 编译到 dist/
+```
 
-# 直连真实 MCP 的 CLI
-npm run build
+下面的 CLI 是我**直连真实 MCP 做回归验证**用的，不是运行 Skill 的必需步骤。
+`--city` / `--keyword` / `--reserve` 只是为了让脚本无人值守跑通而写死的示例值，
+真实使用时这些值来自对话：
+
+```bash
 node dist/src/cli.js menu      --city 深圳市 --keyword 科技园
 node dist/src/cli.js compile   --city 深圳市 --keyword 科技园 \
       --text "预算35元以内，来个汉堡、薯条和可乐，不要吃辣"
 node dist/src/cli.js nutrition --city 深圳市 --keyword 科技园 --kcal 650 --preset highProtein
 node dist/src/cli.js pickup    --city 深圳市 --keyword 科技园 --reserve "2026-10-09 18:00"
 ```
+
+> 小技巧：`query-nearby-stores` 传 `searchType=1` 可查**收藏餐厅**，连地址都不用报。
 
 ---
 
