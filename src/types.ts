@@ -190,9 +190,22 @@ export interface PriceProduct {
   subtotal: number;
 }
 
+export interface MealAssistance {
+  code: string;
+  name: string;
+}
+
 export interface PriceResult {
   productOriginalPrice: number;
   productPrice: number;
+  /** 运费，到店场景为 0 */
+  deliveryOriginalPrice?: number;
+  deliveryPrice?: number;
+  /** 打包费 */
+  packingOriginalPrice?: number;
+  packingPrice?: number;
+  /** 餐具费 */
+  tablewarePrice?: number;
   originalPrice: number;
   discount: number;
   /** 应付金额，单位「分」 */
@@ -200,6 +213,8 @@ export interface PriceResult {
   productList: PriceProduct[];
   /** orderType=1 时才有，create-order 的 takeWayCode 取自这里 */
   takeWayList?: TakeWay[];
+  /** 团餐场景的助餐服务列表（gmServiceCode 取自这里） */
+  mealAssistanceList?: MealAssistance[];
 }
 
 /* ------------------------------------------------------------------ */

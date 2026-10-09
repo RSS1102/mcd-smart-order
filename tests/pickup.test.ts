@@ -211,4 +211,16 @@ Some description with {"fake": true} braces.
     expect(McdError.fromEnvelope({ code: 401 }).kind).toBe('TOKEN_INVALID');
     expect(McdError.fromEnvelope({ code: 429 }).kind).toBe('RATE_LIMITED');
   });
+
+  it('600050 收藏餐厅为空归类为 NO_FAVORITE_STORE，且可降级到位置搜索', () => {
+    const err = McdError.fromEnvelope({
+      success: false,
+      code: 600050,
+      message: '收藏餐厅列表为空，请您提供城市+关键词进行搜索',
+    });
+    expect(err.kind).toBe('NO_FAVORITE_STORE');
+    // 服务端 message 只说"列表为空"，处置建议由 advice() 提供降级路径
+    expect(err.message).toContain('收藏餐厅列表为空');
+    expect(err.advice()).toContain('searchType=2');
+  });
 });

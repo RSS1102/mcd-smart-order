@@ -12,6 +12,7 @@ export type McdErrorCode =
   | 'RATE_LIMITED'
   | 'PARAM_MISSING'
   | 'SOLD_OUT'
+  | 'NO_FAVORITE_STORE'
   | 'STORE_UNSUPPORTED'
   | 'NOT_IN_BUSINESS_HOURS'
   | 'RESERVATION_SLOT_INVALID'
@@ -24,6 +25,9 @@ const CODE_BY_HTTP: Record<number, McdErrorCode> = {
   429: 'RATE_LIMITED',
   400: 'PARAM_MISSING',
   60006: 'SOLD_OUT',
+  // 实测：query-nearby-stores 传 searchType=1 但账号无收藏餐厅时返回
+  // {"success":false,"code":600050,"message":"收藏餐厅列表为空，请您提供城市+关键词进行搜索"}
+  600050: 'NO_FAVORITE_STORE',
 };
 
 const ADVICE: Record<McdErrorCode, string> = {
@@ -31,6 +35,8 @@ const ADVICE: Record<McdErrorCode, string> = {
   RATE_LIMITED: '请求过于频繁（每个 Token 每分钟最多 600 次），请稍后重试。',
   PARAM_MISSING: '必填参数缺失，请检查 storeCode / orderType / beType 是否齐全。',
   SOLD_OUT: '该餐品当前门店已售罄或在该就餐方式下不可售，建议换一个餐品，或确认 orderType/beType 是否正确。',
+  // 可恢复错误：改用 searchType=2 让用户提供城市+关键词即可
+  NO_FAVORITE_STORE: '账号暂无收藏餐厅，请改用位置搜索（searchType=2，需提供城市 + 关键词）。',
   STORE_UNSUPPORTED: '该门店不支持当前就餐方式，请换一家门店或改用其它就餐方式。',
   NOT_IN_BUSINESS_HOURS: '所选时间不在门店营业时间内，请调整取餐时间。',
   RESERVATION_SLOT_INVALID: '所选时段不是该门店提供的预约时段，请从门店返回的 reservationTimeOptions 中重新选择。',
