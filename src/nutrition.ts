@@ -230,9 +230,17 @@ export function planNutrition(
   const kcalLo = target.kcal * (1 - tol);
   const kcalHi = target.kcal * (1 + tol);
 
-  // 预排序：单件越接近「热量缺口 / 剩余件数」越优先
+  // 高蛋白类预设（蛋白供能比 >= 30%）下，蛋白绝对量必须参与排序，
+  // 否则会选出「配比接近但蛋白严重不足」的方案（见文件末尾排序说明）。
+  const targetProteinG = (target.kcal * target.ratio.protein) / 4;
+  const proteinMatters = target.ratio.protein >= 0.3;
+
+  // 预排序：单件越接近「热量缺口 / 剩余件数」越优先；
+  // 高蛋白目标下再叠加蛋白贡献，保证高蛋白餐品能进入候选池
   const pool = [...candidates].filter((c) => c.nutrition.energyKcal <= kcalHi);
-  pool.sort((a, b) => Math.abs(a.nutrition.energyKcal - target.kcal / maxItems) - Math.abs(b.nutrition.energyKcal - target.kcal / maxItems));
+  const poolKey = (c: (typeof pool)[number]) =>
+    Math.abs(c.nutrition.energyKcal - target.kcal / maxItems) - (proteinMatters ? c.nutrition.protein * 3 : 0);
+  pool.sort((a, b) => poolKey(a) - poolKey(b));
 
   const results: NutritionPlan[] = [];
   const path: typeof pool = [];
@@ -295,8 +303,21 @@ export function planNutrition(
     return [];
   }
 
-  // 排序：先按配比偏差，再按热量贴近度
+  // 排序：① 营养素绝对量缺口 → ② 配比偏差 → ③ 热量贴近度
+  //
+  // 为什么要加 ①：只看配比偏差会选出「比例接近、但绝对量严重不足」的组合。
+  // 实测 700 kcal + highProtein（目标蛋白 61g）：纯按偏差会给出
+  // 蛋白仅 36g（达成率 59%）的方案 —— 对「增肌高蛋白」毫无意义。
+  // 因此高蛋白类预设下，先把蛋白缺口小的排前面。
+  const proteinShortfall = (p: NutritionPlan) =>
+    proteinMatters ? Math.max(0, targetProteinG - p.total.protein) : 0;
+
   return results
-    .sort((a, b) => a.deviation - b.deviation || Math.abs(a.total.energyKcal - target.kcal) - Math.abs(b.total.energyKcal - target.kcal))
+    .sort(
+      (a, b) =>
+        proteinShortfall(a) - proteinShortfall(b) ||
+        a.deviation - b.deviation ||
+        Math.abs(a.total.energyKcal - target.kcal) - Math.abs(b.total.energyKcal - target.kcal),
+    )
     .slice(0, topK);
 }

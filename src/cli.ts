@@ -14,7 +14,7 @@
 
 import { McdClient } from './mcp-client.js';
 import { compileOrder, renderResult } from './compiler.js';
-import { defaultConstraints, extractConstraints } from './constraints.js';
+import { applyHardFilters, buildMealViews, defaultConstraints, extractConstraints } from './constraints.js';
 import { MACRO_PRESETS, buildNutritionIndex, matchNutrition, planNutrition } from './nutrition.js';
 import { checkBusinessHours, checkReservationSlot, pickStore, planPickup, renderPickupPlan } from './pickup.js';
 import { McdError } from './errors.js';
@@ -83,7 +83,23 @@ async function main(): Promise<void> {
     const [menu, nutri] = await Promise.all([client.queryMeals(channel), client.listNutritionFoods()]);
     const idx = buildNutritionIndex(nutri);
 
+    // 营养搭配同样必须应用过敏原硬过滤。
+    // 实测：不过滤时 700kcal 高蛋白方案会给出「纯牛奶 + 双层吉士汉堡」组合。
+    const allergens = (arg('allergen') ?? '')
+      .split(/[,，]/)
+      .map((s) => s.trim())
+      .filter(Boolean);
+    const excluded = new Set<string>();
+    if (allergens.length > 0) {
+      const views = buildMealViews(menu, nutri);
+      for (const code of applyHardFilters(views, { ...defaultConstraints(), allergens }).keys()) {
+        excluded.add(code);
+      }
+      console.log(`已按过敏原「${allergens.join('、')}」排除 ${excluded.size} 个餐品\n`);
+    }
+
     const candidates = Object.entries(menu.meals)
+      .filter(([code]) => !excluded.has(code))
       .map(([code, m]) => {
         const nm = matchNutrition(m.name, idx);
         return nm ? { code, name: m.name, nutrition: nm.nutrition, match: nm.level === 'exact' ? ('exact' as const) : ('contains' as const) } : null;
