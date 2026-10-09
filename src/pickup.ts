@@ -66,6 +66,11 @@ function inRange(min: number, r: TimeRange): boolean {
 /* 门店选择                                                            */
 /* ------------------------------------------------------------------ */
 
+/** 距离取值：外送门店没有 distance 字段，排序时视为无穷远 */
+function distOf(s: Store): number {
+  return s.distance ?? Number.MAX_SAFE_INTEGER;
+}
+
 export interface StorePickResult {
   store: Store;
   /** 是否需要用户进一步确认（多个候选） */
@@ -88,15 +93,17 @@ export function pickStore(stores: Store[], hint?: { storeCode?: string; keyword?
   }
   if (hint?.keyword) {
     const kw = hint.keyword.trim();
-    const hits = stores.filter((s) => s.storeName.includes(kw) || s.address.includes(kw));
+    const hits = stores.filter((s) => s.storeName.includes(kw) || (s.address ?? '').includes(kw));
     if (hits.length === 1) return { store: hits[0]!, ambiguous: [], reason: `按关键词「${kw}」唯一匹配` };
     if (hits.length > 1) {
-      const sorted = [...hits].sort((a, b) => a.distance - b.distance);
+      const sorted = [...hits].sort((a, b) => distOf(a) - distOf(b));
       return { store: sorted[0]!, ambiguous: sorted, reason: `关键词「${kw}」命中 ${hits.length} 家，默认取最近的` };
     }
   }
-  const sorted = [...stores].sort((a, b) => a.distance - b.distance);
-  return { store: sorted[0]!, ambiguous: sorted, reason: `未指定门店，默认取最近的（${sorted[0]!.distance} m）` };
+  const sorted = [...stores].sort((a, b) => distOf(a) - distOf(b));
+  const first = sorted[0]!;
+  const distText = first.distance === undefined ? '' : `（${first.distance} m）`;
+  return { store: first, ambiguous: sorted, reason: `未指定门店，默认取最近的${distText}` };
 }
 
 /* ------------------------------------------------------------------ */

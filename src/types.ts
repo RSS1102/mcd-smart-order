@@ -57,23 +57,39 @@ export interface ReservationTimeOption {
   reservationOptionText: string;
 }
 
+/**
+ * 门店。
+ * ⚠️ 到店场景（query-nearby-stores）与外送场景（delivery-query-stores）字段不一致：
+ *  - 到店：有 address / distance / longitude / latitude
+ *  - 外送：**没有** address / distance / longitude / latitude，只有 storeCode + beCode + storeName
+ * 因此这几个字段是可选的，使用时必须做空值处理。
+ */
 export interface Store {
   storeCode: string;
   storeName: string;
-  address: string;
-  /** 单位：米 */
-  distance: number;
+  address?: string;
+  /** 单位：米。外送场景无此字段 */
+  distance?: number;
   /** 是否营业中 */
   businessStatus: boolean;
   businessStartTime: string;
   businessEndTime: string;
-  longitude: number;
-  latitude: number;
+  longitude?: number;
+  latitude?: number;
   /** 是否支持预约 */
   reservation: boolean;
   reservationTimeOptions?: ReservationTimeOption[];
   /** 得来速(beType=5) 场景才有；到店自取(beType=1) 场景为空串 */
   beCode?: string;
+}
+
+/** delivery-query-addresses 返回。注意 phone 服务端已脱敏（如 157****4071） */
+export interface DeliveryAddress {
+  addressId: string;
+  contactName: string;
+  /** 服务端返回即为脱敏值，勿自行拼接完整号码 */
+  phone: string;
+  fullAddress: string;
 }
 
 /* ------------------------------------------------------------------ */

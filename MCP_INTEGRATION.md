@@ -40,15 +40,22 @@
 | `create-order` | 创建订单 | 算价参数 + `takeWayCode`(orderType=1) / `addressId`(orderType=2) | 订单详情 + 支付链接 |
 | `list-nutrition-foods` | 餐品营养成分 | 无 | 紧凑表格文本：`[N]{productName,nutritionDescription,energyKj,energyKcal,protein,fat,carbohydrate,sodium,calcium}` |
 | `query-store-coupons` | 门店可用券 | `storeCode`、`orderType`、`beType` | 当前门店/订单类型可用券 |
+| `delivery-query-addresses` | 外送：查询配送地址 | 无 | `data.addresses[]{addressId, contactName, phone, fullAddress}`，`phone` 服务端已脱敏 |
+| `delivery-query-stores` | 外送：按地址查可配送门店 | `beType`(2/6)、`addressId` | `storeCode`、`beCode`、`storeName`、营业时间、`reservationTimeOptions`；**无** `address`/`distance` 字段 |
 | `now-time-info` | 服务器当前时间 | 无 | `formatted`、`date`、`timestamp`、`dayOfWeek` |
 | `query-order` | 订单状态 | `orderId` | 订单详情、支付/配送状态 |
 
+> `create-order` 会产生真实交易，本项目**未做实际调用**，改为对 `validateOrderInput()`
+> 做 22 项参数校验单测（到店缺 `takeWayCode`、外送缺 `addressId`、团餐缺 `gmServiceCode`、
+> 特调缺 `key`、`remark` 超长等），在发起请求前拦掉参数错误。
+
 ### 2.2 兼容但未在本版本启用
 
-`delivery-query-addresses`、`delivery-create-address`、`delivery-query-stores`、`query-meal-assistance`、
-`query-promotions`（外送/团餐链路）、`available-coupons`、`auto-bind-coupons`、`query-my-coupons`、`query-my-account`、
-`campaign-calendar`、`mall-*`（积分商城）。
-本 Skill 聚焦**到店**场景，外送链路已在类型层预留（`beType=2/6` 的 `beCode` 规则已实现并测试）。
+`delivery-create-address`、`query-meal-assistance`、`query-promotions`、`available-coupons`、
+`auto-bind-coupons`、`query-my-coupons`、`query-my-account`、`campaign-calendar`、`mall-*`（积分商城）。
+
+外送（`beType=2/6`）的**查询链路已实跑验证**，`create-order` 对到店/外送/团餐三种场景的
+参数校验也已覆盖，仅「真实下单」因涉及扣款未执行。
 
 ---
 

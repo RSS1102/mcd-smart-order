@@ -16,6 +16,7 @@
 import type {
   ChannelParams,
   CreateOrderInput,
+  DeliveryAddress,
   McpEnvelope,
   MealDetail,
   Menu,
@@ -123,6 +124,27 @@ export class McdClient {
     return this.callRaw<Store[]>('query-nearby-stores', args);
   }
 
+  /* ---------------- 外送地址 / 门店 ---------------- */
+
+  /** 外送场景：查询用户已创建的配送地址列表（只读，可安全调用） */
+  async deliveryQueryAddresses(): Promise<DeliveryAddress[]> {
+    const data = await this.callRaw<{ addresses: DeliveryAddress[] }>('delivery-query-addresses', {});
+    return data?.addresses ?? [];
+  }
+
+  /**
+   * 外送场景：按地址查询可配送门店。
+   * beType 只允许 2（麦乐送）/ 6（企业团餐）。
+   * 注意：外送门店返回体**没有** address / distance 字段。
+   */
+  async deliveryQueryStores(params: { beType: 2 | 6; addressId: string }): Promise<Store[]> {
+    if (!params.addressId) throw new McdError('PARAM_MISSING', 'delivery-query-stores 的 addressId 必填。');
+    if (params.beType !== 2 && params.beType !== 6) {
+      throw new McdError('PARAM_MISSING', 'delivery-query-stores 的 beType 只能为 2（麦乐送）或 6（企业团餐）。');
+    }
+    return this.callRaw<Store[]>('delivery-query-stores', { beType: params.beType, addressId: params.addressId });
+  }
+
   /* ---------------- 菜单 ---------------- */
 
   async queryMeals(p: ChannelParams): Promise<Menu> {
@@ -150,14 +172,12 @@ export class McdClient {
     return this.callRaw<PriceResult>('calculate-price', { ...channelArgs(p), items: p.items });
   }
 
+  /**
+   * 创建订单 —— 会产生真实交易，务必先经用户确认。
+   * 调用前先跑一遍 validateOrderInput，把参数错误拦在本地，避免产生失败订单。
+   */
   async createOrder(input: CreateOrderInput): Promise<unknown> {
-    assertChannel(input);
-    if (input.orderType === 1 && !input.takeWayCode) {
-      throw new McdError('PARAM_MISSING', 'orderType=1 时 takeWayCode 必传，取值来自 calculate-price 的 takeWayList[].code。');
-    }
-    if (input.orderType === 2 && !input.addressId) {
-      throw new McdError('PARAM_MISSING', 'orderType=2 时 addressId 必传。');
-    }
+    validateOrderInput(input);
     return this.callRaw<unknown>('create-order', input as unknown as Json);
   }
 
@@ -198,6 +218,67 @@ export function assertChannel(p: ChannelParams): void {
   }
   if (p.reservationDate && !/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/.test(p.reservationDate)) {
     throw new McdError('PARAM_MISSING', 'reservationDate 格式必须为 yyyy-MM-dd HH:mm。');
+  }
+}
+
+/**
+ * 下单参数本地校验（纯函数、不联网，因此可完整单测）。
+ *
+ * `create-order` 会产生真实交易，参数错误的代价远高于其它接口，
+ * 所以在发起网络请求之前把能校验的都校验掉。
+ */
+export function validateOrderInput(input: CreateOrderInput): void {
+  assertChannel(input);
+
+  if (!input.items || input.items.length === 0) {
+    throw new McdError('PARAM_MISSING', 'create-order 的 items 不能为空。');
+  }
+
+  for (const [i, it] of input.items.entries()) {
+    if (!it.productCode) throw new McdError('PARAM_MISSING', `items[${i}].productCode 必填。`);
+    if (!Number.isInteger(it.quantity) || it.quantity < 1) {
+      throw new McdError('PARAM_MISSING', `items[${i}].quantity 必填且需 >= 1。`);
+    }
+    for (const v of it.modification?.values ?? []) {
+      if (!v.code) throw new McdError('PARAM_MISSING', `items[${i}] 特调项缺少 code。`);
+      if (!v.key) {
+        throw new McdError(
+          'PARAM_MISSING',
+          `items[${i}] 特调项「${v.code}」缺少 key：选中项用 selectedKey，未选中项若 unselectedKey 非空也必须传。`,
+        );
+      }
+      if (!Number.isInteger(v.quantity) || v.quantity < 0) {
+        throw new McdError('PARAM_MISSING', `items[${i}] 特调项「${v.code}」的 quantity 不能为负。`);
+      }
+    }
+    for (const r of it.roundList ?? []) {
+      if (!r.round) throw new McdError('PARAM_MISSING', `items[${i}].roundList[].round 必填。`);
+      if (!r.comboItemList?.length) {
+        throw new McdError('PARAM_MISSING', `items[${i}] round ${r.round} 的 comboItemList 不能为空。`);
+      }
+      for (const ci of r.comboItemList) {
+        if (!ci.code) throw new McdError('PARAM_MISSING', `items[${i}] round ${r.round} 的 comboItemList[].code 必填。`);
+      }
+    }
+  }
+
+  if (input.orderType === 1 && !input.takeWayCode) {
+    throw new McdError('PARAM_MISSING', 'orderType=1 时 takeWayCode 必传，取值来自 calculate-price 的 takeWayList[].code。');
+  }
+  if (input.orderType === 1 && input.addressId) {
+    throw new McdError('PARAM_MISSING', 'orderType=1（到店）场景不应传 addressId。');
+  }
+  if (input.orderType === 2 && !input.addressId) {
+    throw new McdError('PARAM_MISSING', 'orderType=2 时 addressId 必传，取值来自 delivery-query-addresses。');
+  }
+  if (input.orderType === 2 && input.takeWayCode) {
+    throw new McdError('PARAM_MISSING', 'orderType=2（外送）场景不应传 takeWayCode。');
+  }
+  if (input.beType === 6 && !input.gmServiceCode) {
+    throw new McdError('PARAM_MISSING', '企业团餐(beType=6) 时 gmServiceCode 必传，取自 query-meal-assistance。');
+  }
+  if (input.remark && input.remark.length > 50) {
+    throw new McdError('PARAM_MISSING', 'remark 最多 50 字。');
   }
 }
 

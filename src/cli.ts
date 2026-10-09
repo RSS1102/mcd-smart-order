@@ -128,8 +128,29 @@ async function main(): Promise<void> {
     return;
   }
 
+  if (cmd === 'delivery') {
+    const addresses = await client.deliveryQueryAddresses();
+    if (addresses.length === 0) {
+      console.log('账号暂无配送地址，可先用 delivery-create-address 创建后再试。');
+      return;
+    }
+    const chosen = arg('addressId')
+      ? addresses.find((a) => a.addressId === arg('addressId')) ?? addresses[0]!
+      : addresses[0]!;
+    console.log(`配送地址：${chosen.fullAddress}（${chosen.contactName} ${chosen.phone}）\n`);
+
+    const beType: 2 | 6 = arg('team') ? 6 : 2;
+    const stores = await client.deliveryQueryStores({ beType, addressId: chosen.addressId });
+    console.log(`可配送门店（beType=${beType}）：`);
+    for (const s of stores) {
+      console.log(`  ${s.storeCode}  beCode=${s.beCode ?? '-'}  ${s.storeName}  ${s.businessStartTime}-${s.businessEndTime}`);
+    }
+    console.log('\n注意：外送门店返回体不含 address / distance 字段。');
+    return;
+  }
+
   console.log(`未知命令：${cmd}
-可用命令：menu / compile / nutrition / pickup`);
+可用命令：menu / compile / nutrition / pickup / delivery`);
 }
 
 function nowHm(): string {

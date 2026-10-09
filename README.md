@@ -69,7 +69,7 @@ export MCD_MCP_TOKEN="<你的 MCP Token>"
 
 ```bash
 npm run typecheck     # 类型检查（strict）
-npm run test          # 62 项单元测试，基于真实门店快照，离线可跑
+npm run test          # 85 项单元测试，基于真实门店快照，离线可跑
 npm run build         # 编译到 dist/
 ```
 
@@ -83,6 +83,7 @@ node dist/src/cli.js compile   --city 深圳市 --keyword 科技园 \
       --text "预算35元以内，来个汉堡、薯条和可乐，不要吃辣"
 node dist/src/cli.js nutrition --city 深圳市 --keyword 科技园 --kcal 650 --preset highProtein
 node dist/src/cli.js pickup    --city 深圳市 --keyword 科技园 --reserve "2026-10-09 18:00"
+node dist/src/cli.js delivery                # 外送：查地址 → 查可配送门店
 ```
 
 > 小技巧：`query-nearby-stores` 传 `searchType=1` 可查**收藏餐厅**，连地址都不用报。
@@ -176,8 +177,9 @@ mcd-smart-order/
 │   ├── pickup.ts                  # 门店选择、营业/预约时段校验、自提流程
 │   ├── cli.ts                     # CLI：menu / compile / nutrition / pickup
 │   └── index.ts                   # 公共入口
-├── tests/                         # 62 项单元测试（基于真实门店与菜单快照）
-│   ├── compiler.test.ts  nutrition.test.ts  pickup.test.ts  helpers.ts
+├── tests/                         # 85 项单元测试（基于真实门店与菜单快照）
+│   ├── compiler.test.ts  nutrition.test.ts  pickup.test.ts
+│   ├── order.test.ts     helpers.ts
 ├── fixtures/                      # 真实数据快照（深圳科技园门店，116 个餐品 + 160 条营养）
 │   ├── meals.sample.json  meal-detail.sample.json  nutrition.sample.txt
 └── examples/                      # 示例对话（含真实 MCP 返回）
