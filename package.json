@@ -1,0 +1,23 @@
+{
+  "name": "mcd-smart-order",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "基于麦当劳中国 MCP 的智能点餐 Skill：单人点餐、到店取餐、预算＋偏好点餐编译器、能量营养搭配助手",
+  "license": "MIT",
+  "engines": {
+    "node": ">=20.10.0"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "cli": "npm run build && node dist/src/cli.js"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.5",
+    "typescript": "^5.6.0",
+    "vitest": "^2.1.0"
+  }
+}
