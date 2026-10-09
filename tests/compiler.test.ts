@@ -218,10 +218,24 @@ describe('过敏原硬过滤（安全红线 · 回归锁死）', () => {
     ['521316', '高达吉士双牛堡'],
   ];
 
+  // 名称里没有「奶/冰淇淋」但实为乳制品，容易被漏掉
+  const hiddenDairy: [string, string][] = [
+    ['521951', '灰焰圆筒（冰淇淋甜筒）'],
+    ['514851', '咖啡阿芙佳朵（咖啡+冰淇淋）'],
+    ['9900008752', '派'],
+  ];
+
   it('牛奶过敏必须排除全部「吉士」产品', () => {
     const excluded = applyHardFilters(views, withC({ allergens: ['牛奶'] }));
     for (const [code, name] of cheeseProducts) {
       expect(excluded.has(code), `「${name}」(${code}) 含奶酪，牛奶过敏必须排除`).toBe(true);
+    }
+  });
+
+  it('牛奶过敏排除名称不含「奶」的隐含乳制品', () => {
+    const excluded = applyHardFilters(views, withC({ allergens: ['牛奶'] }));
+    for (const [code, name] of hiddenDairy) {
+      expect(excluded.has(code), `「${name}」(${code}) 实为乳制品，牛奶过敏必须排除`).toBe(true);
     }
   });
 
