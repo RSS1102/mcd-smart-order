@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import { compileOrder, checkCombo, ruleForBudget, renderResult } from '../src/compiler.js';
-import { defaultConstraints, extractConstraints, type Constraints } from '../src/constraints.js';
+import {
+  applyHardFilters,
+  buildMealViews,
+  defaultConstraints,
+  extractConstraints,
+  type Constraints,
+} from '../src/constraints.js';
 import { CHANNEL, loadMenu, loadNutrition } from './helpers.js';
 
 const menu = loadMenu();
@@ -194,5 +200,42 @@ describe('自然语言槽位提取', () => {
     const c = extractConstraints('来一个汉堡、一份薯条和一杯可乐，三件');
     expect(c.requiredSlots).toEqual(expect.arrayContaining(['main', 'side', 'drink']));
     expect(c.itemCount).toEqual({ min: 3, max: 3 });
+  });
+});
+
+describe('过敏原硬过滤（安全红线 · 回归锁死）', () => {
+  // 「吉士」是麦当劳对 cheese 的音译（吉士汉堡 = cheeseburger）。
+  // 历史缺陷：ALLERGEN_RULES.牛奶 曾漏掉该词，导致
+  //   吉士汉堡包套餐 ¥26 / 双层吉士汉堡 ¥23 / 双层吉士汉堡套餐 ¥34 / 高达吉士双牛堡 ¥22.5
+  // 全部通过牛奶过敏过滤并被推荐 —— 对过敏用户构成真实伤害。
+  // 以下用例锁死该行为，防止后续修改关键词表时再次退化。
+  const views = buildMealViews(menu, []);
+
+  const cheeseProducts: [string, string][] = [
+    ['9900005449', '吉士汉堡包套餐'],
+    ['1120', '双层吉士汉堡'],
+    ['9900005464', '双层吉士汉堡套餐'],
+    ['521316', '高达吉士双牛堡'],
+  ];
+
+  it('牛奶过敏必须排除全部「吉士」产品', () => {
+    const excluded = applyHardFilters(views, withC({ allergens: ['牛奶'] }));
+    for (const [code, name] of cheeseProducts) {
+      expect(excluded.has(code), `「${name}」(${code}) 含奶酪，牛奶过敏必须排除`).toBe(true);
+    }
+  });
+
+  it('忌口芝士同样排除「吉士」产品', () => {
+    const excluded = applyHardFilters(views, withC({ avoid: ['芝士'] }));
+    for (const [code, name] of cheeseProducts) {
+      expect(excluded.has(code), `「${name}」(${code}) 应被忌口芝士排除`).toBe(true);
+    }
+  });
+
+  it('未声明牛奶过敏时不应误杀吉士产品', () => {
+    const excluded = applyHardFilters(views, withC({}));
+    for (const [code, name] of cheeseProducts) {
+      expect(excluded.has(code), `「${name}」(${code}) 不应被无谓排除`).toBe(false);
+    }
   });
 });

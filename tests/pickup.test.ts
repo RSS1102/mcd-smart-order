@@ -12,6 +12,13 @@ import { assertChannel, channelArgs, extractEnvelope } from '../src/mcp-client.j
 import { McdError } from '../src/errors.js';
 import { sampleStores } from './helpers.js';
 
+/**
+ * 固定「当前时间」，避免营业时间校验随真实时间漂移。
+ * 历史缺陷：用例曾直接依赖 nowHm()，导致每天 22:00–07:00 之间
+ * 门店 07:00-22:00 被判为打烊，planPickup 抛 NOT_IN_BUSINESS_HOURS 而测试失败。
+ */
+const FIXED_NOW = '12:00';
+
 describe('时间解析', () => {
   it('HH:mm 转分钟', () => {
     expect(toMinutes('00:00')).toBe(0);
@@ -113,7 +120,7 @@ describe('自提流程编排', () => {
   const stores = sampleStores();
 
   it('到店自取 + 立即取餐：不产生 beCode', () => {
-    const p = planPickup({ store: stores[0]!, beType: 1, reserve: false, takeWayList: [{ code: 'eat-in', title: '堂食', subtitle: '店内用餐' }, { code: 'locker-out', title: '外带', subtitle: '店外取餐柜' }] });
+    const p = planPickup({ store: stores[0]!, beType: 1, reserve: false, now: FIXED_NOW, takeWayList: [{ code: 'eat-in', title: '堂食', subtitle: '店内用餐' }, { code: 'locker-out', title: '外带', subtitle: '店外取餐柜' }] });
     expect(p.beCode).toBeUndefined();
     expect(p.channelArgs['beCode']).toBeUndefined();
     expect(p.takeWay?.code).toBe('eat-in');
@@ -122,16 +129,16 @@ describe('自提流程编排', () => {
   });
 
   it('偏好取餐柜时选择 locker-out', () => {
-    const p = planPickup({ store: stores[0]!, beType: 1, reserve: false, takeWayList: [{ code: 'eat-in', title: '堂食', subtitle: '店内用餐' }, { code: 'locker-out', title: '外带', subtitle: '店外取餐柜' }], takeWayHint: '取餐柜' });
+    const p = planPickup({ store: stores[0]!, beType: 1, reserve: false, now: FIXED_NOW, takeWayList: [{ code: 'eat-in', title: '堂食', subtitle: '店内用餐' }, { code: 'locker-out', title: '外带', subtitle: '店外取餐柜' }], takeWayHint: '取餐柜' });
     expect(p.takeWay?.code).toBe('locker-out');
   });
 
   it('得来速缺 beCode 时抛错', () => {
-    expect(() => planPickup({ store: stores[0]!, beType: 5, reserve: false })).toThrow(/得来速 beCode/);
+    expect(() => planPickup({ store: stores[0]!, beType: 5, reserve: false, now: FIXED_NOW })).toThrow(/得来速 beCode/);
   });
 
   it('得来速正常时带上 beCode', () => {
-    const p = planPickup({ store: stores[2]!, beType: 5, reserve: false, takeWayList: [{ code: 'eat-in', title: '堂食', subtitle: '店内用餐' }] });
+    const p = planPickup({ store: stores[2]!, beType: 5, reserve: false, now: FIXED_NOW, takeWayList: [{ code: 'eat-in', title: '堂食', subtitle: '店内用餐' }] });
     expect(p.channelArgs['beCode']).toBe('DT-1420888');
     // 该门店 businessStatus=false，校验项应标红但不阻断
     expect(p.checks.find((c) => c.name === '门店营业状态')!.ok).toBe(false);

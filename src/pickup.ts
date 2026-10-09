@@ -210,6 +210,11 @@ export interface PickupInput {
   takeWayList?: TakeWay[];
   /** 用户偏好的自提方式关键词，如「堂食」「取餐柜」「外带」 */
   takeWayHint?: string;
+  /**
+   * 注入「当前时间」（HH:mm 或 yyyy-MM-dd HH:mm），仅用于测试与确定性重放。
+   * 不传则取真实当前时间 —— 注意这会让营业时间校验结果随时间变化。
+   */
+  now?: string;
 }
 
 export function planPickup(input: PickupInput): PickupPlan {
@@ -244,7 +249,7 @@ export function planPickup(input: PickupInput): PickupPlan {
     if (!r.ok) throw new McdError('RESERVATION_SLOT_INVALID', r.message);
     reservationDate = input.reservationDate;
   } else {
-    const now = input.reservationDate ?? nowHm();
+    const now = input.reservationDate ?? input.now ?? nowHm();
     const b = checkBusinessHours(store, now);
     checks.push({ name: '营业时间', ok: b.ok, message: b.message });
     if (!b.ok) throw new McdError('NOT_IN_BUSINESS_HOURS', b.message);
