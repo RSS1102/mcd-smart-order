@@ -28,39 +28,6 @@
 
 ---
 
-## 📦 项目结构
-
-```
-mcd-smart-order/
-├── SKILL.md                       # Skill 描述与配置（frontmatter + 工作流规则）
-├── README.md                      # 本文件
-├── CONTEST_DECLARATION.md         # 参赛声明（文件名与内容均不可改动）
-├── MCP_INTEGRATION.md             # MCP Server / Tool / 调用流程 / 业务价值
-├── mcp-config.example.json        # 脱敏 MCP 配置（仅环境变量占位符）
-├── LICENSE                        # MIT 许可证
-├── workbuddy.md                   # WorkBuddy 开发上下文
-├── package.json / tsconfig.json
-├── src/
-│   ├── types.ts                   # MCP 数据模型（字段全部来自真实返回）
-│   ├── mcp-client.ts              # Streamable HTTP 客户端 + 通道参数校验 + 信封解析
-│   ├── errors.ts                  # 错误分类（401/429/400/60006/售罄/时段…）
-│   ├── constraints.ts             # 过敏原·忌口·口味知识库、槽位提取、硬过滤
-│   ├── compiler.ts                # ★ 预算＋偏好编译器（查询计划/搜索/松弛阶梯）
-│   ├── nutrition.ts               # 营养表解析、名称匹配、配比求解
-│   ├── pickup.ts                  # 门店选择、营业/预约时段校验、自提流程
-│   ├── cli.ts                     # CLI：menu / compile / nutrition / pickup
-│   └── index.ts                   # 公共入口
-├── tests/                         # 62 项单元测试（基于真实门店与菜单快照）
-│   ├── compiler.test.ts  nutrition.test.ts  pickup.test.ts  helpers.ts
-├── fixtures/                      # 真实数据快照（深圳科技园门店，116 个餐品 + 160 条营养）
-│   ├── meals.sample.json  meal-detail.sample.json  nutrition.sample.txt
-└── examples/                      # 示例对话（含真实 MCP 返回）
-    ├── 01-single-order.md  02-pickup.md
-    ├── 03-budget-compiler.md  04-nutrition.md
-```
-
----
-
 ## 🚀 安装与运行
 
 ### 前置条件
@@ -167,6 +134,39 @@ node dist/src/cli.js pickup    --city 深圳市 --keyword 科技园 --reserve "2
 
 > 完整的技术映射（错误码 `401` / `429` / `400` / `60006`、营业时间、预约时段非法、
 > 地址无可配送门店等）见 [`SKILL.md`](./SKILL.md) §6。
+
+---
+
+## 📦 项目结构
+
+```
+mcd-smart-order/
+├── SKILL.md                       # Skill 描述与配置（frontmatter + 工作流规则）
+├── README.md                      # 本文件
+├── CONTEST_DECLARATION.md         # 参赛声明（文件名与内容均不可改动）
+├── MCP_INTEGRATION.md             # MCP Server / Tool / 调用流程 / 业务价值
+├── mcp-config.example.json        # 脱敏 MCP 配置（仅环境变量占位符）
+├── LICENSE                        # MIT 许可证
+├── workbuddy.md                   # WorkBuddy 开发上下文
+├── package.json / tsconfig.json
+├── src/
+│   ├── types.ts                   # MCP 数据模型（字段全部来自真实返回）
+│   ├── mcp-client.ts              # Streamable HTTP 客户端 + 通道参数校验 + 信封解析
+│   ├── errors.ts                  # 错误分类（401/429/400/60006/售罄/时段…）
+│   ├── constraints.ts             # 过敏原·忌口·口味知识库、槽位提取、硬过滤
+│   ├── compiler.ts                # ★ 预算＋偏好编译器（查询计划/搜索/松弛阶梯）
+│   ├── nutrition.ts               # 营养表解析、名称匹配、配比求解
+│   ├── pickup.ts                  # 门店选择、营业/预约时段校验、自提流程
+│   ├── cli.ts                     # CLI：menu / compile / nutrition / pickup
+│   └── index.ts                   # 公共入口
+├── tests/                         # 62 项单元测试（基于真实门店与菜单快照）
+│   ├── compiler.test.ts  nutrition.test.ts  pickup.test.ts  helpers.ts
+├── fixtures/                      # 真实数据快照（深圳科技园门店，116 个餐品 + 160 条营养）
+│   ├── meals.sample.json  meal-detail.sample.json  nutrition.sample.txt
+└── examples/                      # 示例对话（含真实 MCP 返回）
+    ├── 01-single-order.md  02-pickup.md
+    ├── 03-budget-compiler.md  04-nutrition.md
+```
 
 ---
 
