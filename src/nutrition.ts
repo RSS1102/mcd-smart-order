@@ -229,6 +229,11 @@ export function planNutrition(
   const grams = macroGrams(target);
   const kcalLo = target.kcal * (1 - tol);
   const kcalHi = target.kcal * (1 + tol);
+  // 放宽上限：高蛋白目标下，宁可热量略超也要把蛋白凑够
+  // （实测 650kcal+highProtein：窗口内最好 718kcal/蛋白 44g，
+  //   放宽后有 774kcal/蛋白 50g，达成率 79%→88%，对增肌更有价值）。
+  // 超过此上限的组合一律丢弃，避免为了蛋白无限堆热量。
+  const kcalHiRelaxed = target.kcal * 1.25;
 
   // 高蛋白类预设（蛋白供能比 >= 30%）下，蛋白绝对量必须参与排序，
   // 否则会选出「配比接近但蛋白严重不足」的方案（见文件末尾排序说明）。
@@ -266,6 +271,34 @@ export function planNutrition(
       );
     }
     if (total.sodium > 2000) notes.push(`钠合计 ${Math.round(total.sodium)} mg，已超过成人单餐建议上限 2000 mg，建议搭配无糖饮料或减少酱料。`);
+
+    // 超出默认 ±15% 窗口但仍在放宽上限内 —— 必须标注，让用户知道取舍
+    if (total.energyKcal > kcalHi && total.energyKcal <= kcalHiRelaxed) {
+      notes.push(
+        `热量 ${Math.round(total.energyKcal)} kcal 超出默认窗口上限 ${Math.round(kcalHi)} kcal` +
+          `（+${(((total.energyKcal / kcalHi) - 1) * 100).toFixed(0)}%）。` +
+          `为达成蛋白目标已放宽至 +25%，若需严守热量请改选其它方案。`,
+      );
+    }
+
+    // 达成率异常必须单独点名，不能只混在汇总数字里
+    // （实测脂肪达成率 171.7% 只出现在汇总中，用户容易忽略）
+    const macroRows: Array<[string, number, number]> = [
+      ['蛋白', total.protein, grams.protein],
+      ['碳水', total.carbohydrate, grams.carb],
+      ['脂肪', total.fat, grams.fat],
+    ];
+    for (const [label, actualG, goalG] of macroRows) {
+      if (goalG <= 0) continue;
+      const r = actualG / goalG;
+      if (r > 1.5 || r < 0.6) {
+        notes.push(
+          `${label}达成率 ${(r * 100).toFixed(0)}%（${actualG.toFixed(0)}g / 目标 ${goalG.toFixed(0)}g），` +
+            `${r > 1.5 ? '严重超标' : '严重不足'} —— 该方案在${label}维度上明显偏离目标，` +
+            `${r > 1.5 ? '控脂人群慎选' : '若这是你的主要诉求请换方案'}。`,
+        );
+      }
+    }
     return {
       items: picked.map((p) => ({ name: p.name, code: p.code, nutrition: p.nutrition, match: p.match })),
       total,
@@ -290,7 +323,9 @@ export function planNutrition(
     for (let i = start; i < pool.length; i++) {
       const c = pool[i]!;
       const next = sumNutrition([...path.map((p) => p.nutrition), c.nutrition]);
-      if (next.energyKcal > kcalHi) continue; // 热量上界剪枝
+      // 剪枝必须用放宽后的上限，不能用默认 kcalHi —— 否则「超窗换蛋白」的组合
+      // 在生成阶段就被剪掉，后面放宽逻辑永远没机会生效。
+      if (next.energyKcal > kcalHiRelaxed) continue;
       path.push(c);
       dfs(i + 1);
       path.pop();
@@ -318,10 +353,17 @@ export function planNutrition(
   // 实测 700 kcal + highProtein（目标蛋白 61g）：纯按偏差会给出
   // 蛋白仅 36g（达成率 59%）的方案 —— 对「增肌高蛋白」毫无意义。
   // 因此高蛋白类预设下，先把蛋白缺口小的排前面。
-  const proteinShortfall = (p: NutritionPlan) =>
-    proteinMatters ? Math.max(0, targetProteinG - p.total.protein) : 0;
+  // 超窗方案要加惩罚，否则 Top-N 会被「热量超标但蛋白略高」的组合占满，
+  // 用户要 650kcal 却全是 774kcal 的方案。惩罚取目标蛋白的 10%：
+  // 只有蛋白提升幅度超过这个量时，超窗才划算。
+  const overWindowPenalty = targetProteinG * 0.1;
+  const proteinShortfall = (p: NutritionPlan) => {
+    const base = proteinMatters ? Math.max(0, targetProteinG - p.total.protein) : 0;
+    return base + (p.total.energyKcal > kcalHi ? overWindowPenalty : 0);
+  };
 
   return results
+    .filter((p) => p.total.energyKcal <= kcalHiRelaxed) // 超过放宽上限一律丢弃
     .sort(
       (a, b) =>
         proteinShortfall(a) - proteinShortfall(b) ||

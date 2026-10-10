@@ -123,3 +123,74 @@ describe('营养搭配求解', () => {
     expect(any).toBeDefined();
   });
 });
+
+describe('目标不可达与异常达成率必须明说（回归锁死）', () => {
+  // 用固定三件构造确定场景，避免依赖真实菜单波动
+  const cand = (name: string, kcal: number, p: number, f: number, c: number) => ({
+    code: name,
+    name,
+    nutrition: {
+      productName: name,
+      nutritionDescription: null,
+      energyKj: kcal * 4.184,
+      energyKcal: kcal,
+      protein: p,
+      fat: f,
+      carbohydrate: c,
+      sodium: 0,
+      calcium: 0,
+    },
+    match: 'exact' as const,
+  });
+
+  it('蛋白未达目标 75% 时必须输出「不可达」提示', () => {
+    // 高蛋白目标 600kcal → 蛋白 52.5g；给一堆低蛋白餐品，必然不可达
+    const plans = planNutrition(
+      [cand('低蛋白A', 300, 5, 10, 40), cand('低蛋白B', 300, 5, 10, 40)],
+      { kcal: 600, ratio: MACRO_PRESETS['highProtein']! },
+      { maxItems: 2, topK: 1 },
+    );
+    expect(plans.length).toBeGreaterThan(0);
+    const joined = plans[0]!.notes.join(' ');
+    expect(joined).toContain('不可达');
+    expect(joined).toMatch(/蛋白目标 \d+g 不可达/);
+  });
+
+  it('脂肪严重超标（>150%）时必须单独点名', () => {
+    // 目标脂肪 = 600 × 0.25 / 9 ≈ 16.7g；给一份 40g 脂肪的，达成率约 240%
+    const plans = planNutrition(
+      [cand('高脂A', 300, 20, 25, 10), cand('高脂B', 300, 20, 25, 10)],
+      { kcal: 600, ratio: MACRO_PRESETS['highProtein']! },
+      { maxItems: 2, topK: 1 },
+    );
+    expect(plans.length).toBeGreaterThan(0);
+    const joined = plans[0]!.notes.join(' ');
+    expect(joined).toMatch(/脂肪达成率 \d+%/);
+    expect(joined).toContain('严重超标');
+  });
+
+  it('超出默认热量窗口的方案必须标注放宽幅度', () => {
+    // 600kcal 默认窗口上限 690；这里组合到 ~720，落在 +25%(=750) 内
+    const plans = planNutrition(
+      [cand('甲', 360, 25, 15, 30), cand('乙', 360, 25, 15, 30)],
+      { kcal: 600, ratio: MACRO_PRESETS['highProtein']! },
+      { maxItems: 2, topK: 3 },
+    );
+    const over = plans.filter((p) => p.total.energyKcal > 600 * 1.15);
+    expect(over.length).toBeGreaterThan(0);
+    const joined = over[0]!.notes.join(' ');
+    expect(joined).toContain('超出默认窗口上限');
+    expect(joined).toContain('+25%');
+  });
+
+  it('超过 +25% 放宽上限的组合一律丢弃', () => {
+    const plans = planNutrition(
+      [cand('大A', 400, 30, 18, 34), cand('大B', 400, 30, 18, 34)],
+      { kcal: 600, ratio: MACRO_PRESETS['highProtein']! },
+      { maxItems: 2, topK: 5 },
+    );
+    for (const p of plans) {
+      expect(p.total.energyKcal, `方案热量 ${p.total.energyKcal} 超出 +25% 上限`).toBeLessThanOrEqual(600 * 1.25);
+    }
+  });
+});
