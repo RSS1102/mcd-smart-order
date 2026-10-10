@@ -256,6 +256,15 @@ export function planNutrition(
     if (picked.some((p) => p.match === 'contains')) {
       notes.push('部分餐品未在营养表中精确命中，采用名称近似匹配，数值为估算值。');
     }
+    // 目标不可达时必须明说，否则用户会误以为诉求已满足。
+    // 实测：650kcal + highProtein 目标蛋白 56.9g，早餐菜单窗口内上限仅 46g。
+    if (proteinMatters && total.protein < targetProteinG * 0.75) {
+      notes.push(
+        `蛋白目标 ${targetProteinG.toFixed(0)}g 不可达：本方案仅 ${total.protein.toFixed(0)}g` +
+          `（达成率 ${((total.protein / targetProteinG) * 100).toFixed(0)}%，下限为目标的 75%）。` +
+          `建议：提高热量目标、或换到正餐时段（当前菜单缺少高蛋白正餐，如鸡翅/多肉类）。`,
+      );
+    }
     if (total.sodium > 2000) notes.push(`钠合计 ${Math.round(total.sodium)} mg，已超过成人单餐建议上限 2000 mg，建议搭配无糖饮料或减少酱料。`);
     return {
       items: picked.map((p) => ({ name: p.name, code: p.code, nutrition: p.nutrition, match: p.match })),
