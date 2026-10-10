@@ -108,6 +108,14 @@ export const ALLERGEN_RULES: Record<string, string[]> = {
     '巧克力',
     '朱古力',
     '可可',
+    // 咖啡/甜品里的乳制品名，此前完全未覆盖
+    '卡布奇诺',
+    '玛奇朵',
+    '拉丝', // 马苏里拉拉丝芝士条
+    '马苏里拉',
+    '鲜奶',
+    '乳脂',
+    '奶冻',
   ],
   小麦: ['堡', '麦满分', '卷', '面包', '派', '薯条'],
   大豆: ['豆'],
@@ -214,8 +222,16 @@ export interface MealView {
 const COMBO_RE = /件套|套餐|双人餐|三人餐|四人餐|全家桶|拼盘|乐园餐|随心配|超值餐|欢乐餐/;
 
 /** 名称 + 标签 + 分类拼接出的「可搜索文本」 */
-function haystack(name: string, tags: string[], categories: string[]): string {
-  return normalizeName([name, ...tags, ...categories].join('|'));
+/**
+ * 硬过滤的匹配文本。**刻意不含分类名**。
+ *
+ * 原因（实测踩坑）：分类名含「堡」的有「巨无霸牛鱼肉堡」「安格斯MAX厚牛堡」
+ * 「鸡肉汉堡/卷」等。若让分类名参与匹配，小麦过敏下的 `堡` 会命中**分类名**，
+ * 把这三个分类下的**全部**餐品连坐判死 —— 误杀范围远大于收益。
+ * 餐品名与 tags 已足够承载成分信息，分类名只提供品类信息，不用于排除决策。
+ */
+function haystack(name: string, tags: string[], _categories: string[]): string {
+  return normalizeName([name, ...tags].join('|'));
 }
 
 export function matchRule(text: string, rules: Record<string, string[]>): string[] {
