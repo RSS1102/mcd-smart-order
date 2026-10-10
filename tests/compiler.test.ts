@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { compileOrder, checkCombo, ruleForBudget, renderResult } from '../src/compiler.js';
 import {
+  ALLERGEN_RULES,
   applyHardFilters,
   buildMealViews,
   defaultConstraints,
@@ -251,6 +252,30 @@ describe('过敏原硬过滤（安全红线 · 回归锁死）', () => {
     const excluded = applyHardFilters(views, withC({}));
     for (const [code, name] of cheeseProducts) {
       expect(excluded.has(code), `「${name}」(${code}) 不应被无谓排除`).toBe(false);
+    }
+  });
+
+  // 契约测试：这些词都是踩过坑才补进去的，删掉任何一个都会造成真实漏判。
+  // （fixtures 是白天菜单快照，不含巧克力味厚松饼等早餐品，故在此锁关键词而非具体 code）
+  it('牛奶关键词表必须包含全部已确认的高危词', () => {
+    const must = [
+      '吉士', // cheese 音译：吉士汉堡 = cheeseburger
+      '起司',
+      '干酪',
+      '乳酪',
+      '圆筒', // 冰淇淋甜筒
+      '阿芙佳朵', // 咖啡 + 冰淇淋
+      '派', // 烘焙配料含乳
+      '牧场', // ranch，含动物奶油
+      '巧克力', // 奶巧
+      '朱古力',
+      '可可',
+      '黄油',
+      '酸奶',
+      '慕斯',
+    ];
+    for (const w of must) {
+      expect(ALLERGEN_RULES['牛奶'], `牛奶规则缺少关键词「${w}」`).toContain(w);
     }
   });
 });
