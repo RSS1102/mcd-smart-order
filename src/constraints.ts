@@ -359,7 +359,13 @@ export function hitHardFilters(text: string, c: Constraints): string[] {
  *                    false = 只要有任一选项命中就算（用户可能换到含敏档位）
  */
 export function scanSubItems(
-  detail: { rounds?: Array<{ name?: string; minQuantity?: number; choices?: Array<{ name?: string; isDefault?: number }> }> },
+  detail: {
+    rounds?: Array<{
+      name?: string;
+      minQuantity?: number;
+      choices?: Array<{ name?: string; isDefault?: number; quantity?: number }>;
+    }>;
+  },
   c: Constraints,
   requireAll = false,
 ): { reason: string; where: string }[] {
@@ -373,9 +379,14 @@ export function scanSubItems(
     }
     for (const ch of choices) {
       if (!ch.name) continue;
-      // 默认项必选 → 命中即整单不可解
-      // 非默认项命中 → 仅提示「请勿更换」，不计入排除
-      if (requireAll || ch.isDefault === 1) {
+      // 🔴 判据是「是否实际会装进这单」，不是「是否默认」。
+      // 实测 BFF四宫格小食盘 9900015730 轮1 minQuantity=3，默认配置是 3 件：
+      //   麦辣鸡翅-2块 (isDefault=1) + 麦乐鸡-5块 (isDefault=0 但 quantity=1)
+      //   + 脆皮鸡柳3根 (isDefault=0 但 quantity=1)
+      // 只看 isDefault=1 会漏掉后两件。
+      // 真正的「用户没选、可不加」的项是 quantity=0 且 isDefault=0。
+      const selected = ch.isDefault === 1 || (ch.quantity ?? 0) >= 1;
+      if (requireAll || selected) {
         const why = hitHardFilters(ch.name, c);
         if (why.length) hits.push({ reason: why.join('/'), where: `子项「${ch.name}」` });
       }

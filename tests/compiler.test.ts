@@ -393,3 +393,29 @@ describe('槽位语义（回归锁死）', () => {
     expect(v.slots).not.toContain('main');
   });
 });
+
+describe('子项选中判据（isDefault 或 quantity>=1）', () => {
+  it('isDefault=0 但 quantity>=1 的子项也必须扫', () => {
+    // 实测 BFF四宫格小食盘 9900015730：轮1 装 3 件，后两件 isDefault=0 但 quantity=1
+    const detail = {
+      rounds: [
+        {
+          name: '选3件',
+          minQuantity: 3,
+          choices: [
+            { name: '麦辣鸡翅-2块', isDefault: 1, quantity: 1 },
+            { name: '麦乐鸡-5块', isDefault: 0, quantity: 1 },
+            { name: '脆皮鸡柳3根', isDefault: 0, quantity: 1 },
+            { name: '玉米杯', isDefault: 0, quantity: 0 },
+          ],
+        },
+      ],
+    };
+    const hits = scanSubItems(detail, { ...defaultConstraints(), allergens: ['小麦'] });
+    const names = hits.map((h) => h.where).join(' ');
+    expect(names).toContain('麦辣鸡翅-2块');
+    expect(names).toContain('麦乐鸡-5块'); // 关键：isDefault=0 但被选中
+    expect(names).toContain('脆皮鸡柳3根');
+    expect(names).not.toContain('玉米杯'); // quantity=0 未选中
+  });
+});
