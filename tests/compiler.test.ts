@@ -6,6 +6,7 @@ import {
   buildMealViews,
   defaultConstraints,
   extractConstraints,
+  scanSubItems,
   type Constraints,
 } from '../src/constraints.js';
 import { CHANNEL, loadMenu, loadNutrition } from './helpers.js';
@@ -303,6 +304,9 @@ describe('过敏原硬过滤（安全红线 · 回归锁死）', () => {
       'V翅', // 裹粉
       '鸡排', // 裹粉
       '脆汁鸡', // 裹粉
+      '鸡柳', // 裹粉（蘸酱脆皮鸡柳）
+      '炸鸡', // 裹粉（蘸酱炸鸡）
+      '巨无霸', // 面包胚，但名称里没有「堡」——最易漏的一个
       '麦香鱼', // 面包胚但名称无「堡」
       '麦香鸡',
       '饼干',
@@ -311,5 +315,81 @@ describe('过敏原硬过滤（安全红线 · 回归锁死）', () => {
     for (const w of must) {
       expect(ALLERGEN_RULES['小麦'], `小麦规则缺少关键词「${w}」`).toContain(w);
     }
+  });
+});
+
+describe('套餐子项下钻（scanSubItems）', () => {
+  const c = (allergens: string[]) => ({ ...defaultConstraints(), allergens });
+
+  it('套餐名干净但子项含过敏原时必须命中', () => {
+    // 「巨无霸三件套」名称不含「堡」，但主食是巨无霸
+    const detail = {
+      rounds: [
+        { name: '选择汉堡', choices: [{ name: '巨无霸', isDefault: 1 }] },
+        { name: '选择小食', choices: [{ name: '中薯条', isDefault: 1 }, { name: '玉米杯', isDefault: 0 }] },
+      ],
+    };
+    const hits = scanSubItems(detail, c(['小麦']));
+    expect(hits.length).toBeGreaterThan(0);
+    expect(hits.some((h) => h.where.includes('巨无霸'))).toBe(true);
+  });
+
+  it('「巨无霸」在名称层也必须被拦（名称里没有「堡」）', () => {
+    const views = buildMealViews(
+      {
+        categories: [],
+        meals: { '1100': { name: '巨无霸', currentPrice: '25.5', originalPrice: '25.5' } },
+      } as never,
+      [],
+    );
+    const ex = applyHardFilters(views, c(['小麦']));
+    expect(ex.has('1100'), '巨无霸必须被小麦过敏排除（名称里没有「堡」）').toBe(true);
+  });
+
+  it('非默认子项命中时默认不排除（用户可能不换到该档）', () => {
+    // 默认项「玉米杯」干净；非默认「巨无霸」含过敏原但用户不会换到
+    const detail = {
+      rounds: [{ name: '选择小食', choices: [{ name: '玉米杯', isDefault: 1 }, { name: '巨无霸', isDefault: 0 }] }],
+    };
+    expect(scanSubItems(detail, c(['小麦']), false).length).toBe(0);
+  });
+
+  it('rounds[].name 本身含关键词时也要命中', () => {
+    const detail = {
+      rounds: [{ name: '韩式辣椒黄油风味酱', choices: [{ name: '原味', isDefault: 1 }] }],
+    };
+    const hits = scanSubItems(detail, c(['牛奶']));
+    expect(hits.length).toBeGreaterThan(0);
+    expect(hits[0]!.where).toContain('round');
+  });
+
+  it('无 rounds 时返回空（单品路径不误报）', () => {
+    expect(scanSubItems({}, c(['小麦'])).length).toBe(0);
+  });
+});
+
+describe('槽位语义（回归锁死）', () => {
+  it('「最好有饮料」是软偏好，不得写入 requiredSlots', () => {
+    // 写成硬槽位会把本来可行的组合误判为无解，并退化成「只给一杯饮料」
+    expect(extractConstraints('预算40元，我小麦过敏，最好有饮料').requiredSlots).toEqual([]);
+    expect(extractConstraints('40元以内，最好能有个汉堡').requiredSlots).toEqual([]);
+  });
+
+  it('明确要求的槽位仍然是硬约束', () => {
+    expect(extractConstraints('来一个汉堡、一份薯条和一杯可乐').requiredSlots).toEqual(
+      expect.arrayContaining(['main', 'side', 'drink']),
+    );
+  });
+
+  it('酱料/调味品不得作为主食槽位', () => {
+    const views = buildMealViews(
+      {
+        categories: [],
+        meals: { '521000': { name: '北美招牌牧场酱', currentPrice: '3.0', originalPrice: '3.0' } },
+      } as never,
+      [],
+    );
+    const v = views.find((x) => x.code === '521000')!;
+    expect(v.slots).not.toContain('main');
   });
 });

@@ -416,6 +416,16 @@ export interface CompileOptions {
   topK?: number;
   /** 是否启用松弛阶梯，默认 true */
   allowRelax?: boolean;
+  /**
+   * 由调用方**下钻套餐子项**后判定不可用的餐品：code -> 原因（见 scanSubItems）。
+   *
+   * 为什么需要外部注入：套餐名只描述主食，名称层过滤会漏判。
+   * 实测「巨无霸三件套」名称不含「堡」，却能逃过小麦过敏过滤被推荐出去，
+   * 而它的主食就是巨无霸（面包胚）。必须下钻到 rounds[].choices[].name 才能拦下。
+   *
+   * 不在此处直接调 MCP 是为了保持 compiler 是纯函数（离线可测）。
+   */
+  comboExclusions?: Map<string, string>;
 }
 
 /** 主入口：编译 + 求解 */
@@ -430,6 +440,15 @@ export function compileOrder(
   const allowRelax = opts.allowRelax ?? true;
 
   const views = buildMealViews(menu, nutritionList);
+
+  // 并入外部下钻结论，复用现有排除机制（不新增分支）
+  if (opts.comboExclusions?.size) {
+    for (const v of views) {
+      const why = opts.comboExclusions.get(v.code);
+      if (why && v.excluded.length === 0) v.excluded = [why];
+    }
+  }
+
   const plan = compileQuery(constraints, views, channel);
   const explanation: string[] = [];
 
@@ -439,7 +458,32 @@ export function compileOrder(
   ): { feasible: Combo[]; all: Combo[]; violations: Violation[]; stats: { searched: number; pruned: number } } => {
     const live = views.filter((v) => v.excluded.length === 0);
     const rule = ruleForBudget(c.budgetMax);
-    const slots = plan.slots.length ? plan.slots : rule.slots;
+    let slots = plan.slots.length ? plan.slots : rule.slots;
+
+    // 无主食档：官方搭配规则每档都含汉堡（主食），过敏原把主食清空后就无档可用。
+    // 此时把 main 换成 side，避免退化成「只给一杯饮料」或「只给一个超预算套餐」。
+    //
+    // ⚠️ 注意判断条件：plan.slots 由预算规则推导，**永远非空**，
+    // 不能用 `!plan.slots.length` 判断「用户没指定」——那会让这段永远不执行。
+    // 正确判据是：用户**没有显式要求**主食（requiredSlots 不含 main），
+    // 且主食池确实为空。
+    let downgraded = false;
+    if (
+      slots.includes('main') &&
+      !c.requiredSlots.includes('main') &&
+      poolForSlot(live, 'main', c).length === 0
+    ) {
+      const alt = slots.map((s) => (s === 'main' ? ('side' as const) : s));
+      if (alt.every((s) => poolForSlot(live, s, c).length > 0)) {
+        slots = dedupeSlots(alt);
+        downgraded = true;
+        explanation.push(
+          `⚠️ 当前约束下本店没有可用主食（已全部被过敏原/忌口规则排除），` +
+            `已改用「无主食档」：以小食+饮料组合替代。这类组合热量偏低，可能不足以当一餐。`,
+        );
+      }
+    }
+
     const feasible: Combo[] = [];
     const all: Combo[] = [];
     let searched = 0;
@@ -662,6 +706,11 @@ export function renderResult(r: CompileResult): string {
       out.push(`仍然严格保留：${r.alternative.kept.join('、')}`);
       out.push(renderCombo(r.alternative.combo));
     }
+  }
+  // explanation 里含「排除了多少餐品」「改用了无主食档」等关键知情信息，
+  // 之前从未输出，用户看不到过滤范围与降级原因。
+  if (r.explanation?.length) {
+    out.push('\n📌 说明：\n' + r.explanation.map((x) => `  - ${x}`).join('\n'));
   }
   return out.join('\n');
 }

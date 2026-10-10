@@ -14,7 +14,7 @@
 
 import { McdClient } from './mcp-client.js';
 import { compileOrder, renderResult } from './compiler.js';
-import { applyHardFilters, buildMealViews, defaultConstraints, extractConstraints } from './constraints.js';
+import { applyHardFilters, buildMealViews, defaultConstraints, extractConstraints, scanSubItems } from './constraints.js';
 import { MACRO_PRESETS, buildNutritionIndex, matchNutrition, planNutrition } from './nutrition.js';
 import { checkBusinessHours, checkReservationSlot, pickStore, planPickup, renderPickupPlan } from './pickup.js';
 import { McdError } from './errors.js';
@@ -27,6 +27,50 @@ function arg(name: string, def?: string): string | undefined {
 }
 function has(name: string): boolean {
   return process.argv.includes(`--${name}`);
+}
+
+/**
+ * 下钻餐品的组成子项，拦下「名称干净但子项含过敏原」的漏网。
+ *
+ * 只对**套餐**下钻（单品的名称已能反映自身；特调 modification 按 §4.5 只在
+ * 牛奶/鸡蛋等配料型过敏原时才需要，这里覆盖 choices/rounds 这一层即主要风险面）。
+ *
+ * @param maxRounds 最多迭代几轮：每轮排除后可能有新套餐递补进 Top-K，需重新下钻
+ */
+async function deepScanCombos(
+  client: McdClient,
+  menu: { meals: Record<string, { name: string }> },
+  channel: { storeCode: string; orderType: 1 | 2; beType: BeType },
+  c: ReturnType<typeof defaultConstraints>,
+  maxRounds: number,
+): Promise<Map<string, string>> {
+  const out = new Map<string, string>();
+
+  // 只对看起来像套餐的 code 下钻（套餐 code 与单品 code 段位不同，这里按名称特征 + 全量兜底）
+  const comboCodes = Object.entries(menu.meals)
+    .filter(([, m]) => /件套|套餐|随心配|乐园餐|双拼|全盒|拼盘|四宫格/.test(m.name))
+    .map(([code]) => code);
+
+  for (let round = 0; round < maxRounds; round++) {
+    const pending = comboCodes.filter((code) => !out.has(code));
+    if (pending.length === 0) break;
+
+    let found = 0;
+    for (const code of pending) {
+      try {
+        const d = (await client.queryMealDetail({ ...channel, code })) as Parameters<typeof scanSubItems>[0];
+        const hits = scanSubItems(d, c);
+        if (hits.length) {
+          out.set(code, `子项不可用（${hits.map((h) => `${h.where} ${h.reason}`).join('、')}）`);
+          found++;
+        }
+      } catch {
+        // 详情取不到（售罄/不在当前时段菜单）：不因此排除，交给后续算价层报错
+      }
+    }
+    if (found === 0) break; // 本轮无新增，结果已稳定
+  }
+  return out;
 }
 
 async function resolveStore(client: McdClient, beType: 1 | 5 = 1) {
@@ -68,7 +112,18 @@ async function main(): Promise<void> {
 
     console.log(`门店：${store.storeName}（${store.storeCode}）`);
     console.log(`解析到的约束：${JSON.stringify({ ...c, requiredSlots: c.requiredSlots }, null, 1)}\n`);
-    const r = compileOrder(menu, nutri, channel, c, { topK: 3 });
+
+    // 下钻套餐子项：套餐名只描述主食，名称层过滤会漏判
+    const exclusions = await deepScanCombos(client, menu, channel, c, 3);
+    if (exclusions.size) {
+      console.log(`🔎 下钻 ${exclusions.size} 个餐品的组成子项，发现不可用：`);
+      for (const [code, why] of exclusions) {
+        console.log(`   ✗ ${menu.meals[code]?.name ?? code}（${code}）—— ${why}`);
+      }
+      console.log();
+    }
+
+    const r = compileOrder(menu, nutri, channel, c, { topK: 3, comboExclusions: exclusions });
     console.log(renderResult(r));
     console.log(`\n[统计] 搜索 ${r.stats.searched} 个组合，剪枝 ${r.stats.pruned} 次`);
     return;

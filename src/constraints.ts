@@ -120,8 +120,10 @@ export const ALLERGEN_RULES: Record<string, string[]> = {
   // 小麦（麸质）保守匹配。分四类，缺任何一类都会产生危险假阴性：
   //   ① 面包胚类：堡 / 麦满分 / 卷 / 面包 / 派
   //   ② 薯制品：薯条 / 薯饼 / 扭扭薯（与薯条同口径，避免「薯条杀、扭扭薯放」的不一致）
-  //   ③ 裹粉炸鸡：麦乐鸡 / 鸡翅 / V翅 / 鸡排 / 脆汁鸡（外裹粉含小麦）
-  //   ④ 其它：麦香鱼 / 麦香鸡（面包胚但名称无「堡」）、饼干、圆筒（蛋卷筒）
+  //   ③ 裹粉炸鸡：麦乐鸡 / 鸡翅 / V翅 / 鸡排 / 脆汁鸡 / 鸡柳 / 炸鸡（外裹粉含小麦）
+  //   ④ 面包胚但名称无「堡」：巨无霸 / 麦香鱼 / 麦香鸡
+  //   ⑤ 其它：饼干、圆筒（冰淇淋蛋卷筒）
+  // 注：「巨无霸」三个字里没有「堡」，是最容易漏的一个，别以为「堡」能覆盖它。
   小麦: [
     '堡',
     '麦满分',
@@ -136,6 +138,9 @@ export const ALLERGEN_RULES: Record<string, string[]> = {
     'V翅',
     '鸡排',
     '脆汁鸡',
+    '鸡柳',
+    '炸鸡',
+    '巨无霸',
     '麦香鱼',
     '麦香鸡',
     '饼干',
@@ -298,6 +303,9 @@ export function buildMealViews(menu: Menu, nutritionList: Nutrition[]): MealView
       finalSlots.add('side');
       finalSlots.add('drink');
     }
+    // 酱料/调味品不是主食。实测「北美招牌牧场酱 ¥3」被分类推导成 main，
+    // 会在主食稀缺时占位，产出「酱 + 小食 + 饮料」这种不像一顿饭的方案。
+    if (/(?:酱|蘸酱|调味|风味酱)$|酱$/.test(m.name.trim())) finalSlots.delete('main');
     views.push({
       code,
       name: m.name,
@@ -320,6 +328,62 @@ export function buildMealViews(menu: Menu, nutritionList: Nutrition[]): MealView
 }
 
 /** 应用硬约束，给 view 打 excluded 标记，返回被排除的原因映射 */
+/**
+ * 对**单个文本**跑硬过滤（用于套餐子项名、rounds 名等）。
+ * 返回命中原因数组，空数组 = 通过。
+ * 规则与 applyHardFilters 完全一致，避免两处规则漂移。
+ */
+export function hitHardFilters(text: string, c: Constraints): string[] {
+  const t = normalizeName(text);
+  const why: string[] = [];
+  for (const a of c.allergens) {
+    const words = ALLERGEN_RULES[a] ?? [a];
+    if (words.some((w) => t.includes(normalizeName(w)))) why.push(`含过敏原「${a}」`);
+  }
+  for (const av of c.avoid) {
+    const words = AVOID_RULES[av] ?? [av];
+    if (words.some((w) => t.includes(normalizeName(w)))) why.push(`忌口「${av}」`);
+  }
+  if (c.vegetarian && NON_VEGETARIAN.some((w) => t.includes(normalizeName(w)))) why.push('非素食');
+  return why;
+}
+
+/**
+ * 扫描套餐/单品的**组成子项**，返回命中的过敏原/忌口原因。
+ *
+ * 用途：套餐名只描述主食（如「巨无霸三件套」名称不含「堡」），
+ * 名称层过滤会漏判。必须下钻到 rounds[].choices[].name 与 rounds[].name。
+ *
+ * @param detail query-meal-detail 的返回
+ * @param requireAll  true = 该轮所有选项都命中才算（整单必然不可解）
+ *                    false = 只要有任一选项命中就算（用户可能换到含敏档位）
+ */
+export function scanSubItems(
+  detail: { rounds?: Array<{ name?: string; minQuantity?: number; choices?: Array<{ name?: string; isDefault?: number }> }> },
+  c: Constraints,
+  requireAll = false,
+): { reason: string; where: string }[] {
+  const hits: { reason: string; where: string }[] = [];
+  for (const r of detail.rounds ?? []) {
+    const choices = r.choices ?? [];
+    // rounds[].name 本身也可能含关键词（如「韩式辣椒黄油风味酱」）
+    if (r.name) {
+      const why = hitHardFilters(r.name, c);
+      if (why.length) hits.push({ reason: why.join('/'), where: `round「${r.name}」` });
+    }
+    for (const ch of choices) {
+      if (!ch.name) continue;
+      // 默认项必选 → 命中即整单不可解
+      // 非默认项命中 → 仅提示「请勿更换」，不计入排除
+      if (requireAll || ch.isDefault === 1) {
+        const why = hitHardFilters(ch.name, c);
+        if (why.length) hits.push({ reason: why.join('/'), where: `子项「${ch.name}」` });
+      }
+    }
+  }
+  return hits;
+}
+
 export function applyHardFilters(views: MealView[], c: Constraints): Map<string, string[]> {
   const reasons = new Map<string, string[]>();
   for (const v of views) {
@@ -462,10 +526,23 @@ export function extractConstraints(utterance: string): Constraints {
   }
 
   // 槽位
+  //
+  // ⚠️ 软偏好 vs 硬槽位的区分（与 SKILL.md §4.3 一致）：
+  // 「**最好**有饮料」「**想**喝可乐」是偏好，不是硬性要求。
+  // 若写成 requiredSlots，会把本来可行的组合误判为无解
+  // （实测：小麦过敏 + 「最好有饮料」→ slots 只剩 ['drink'] → 只输出单件饮料）。
   const slots: SlotName[] = [];
-  if (/汉堡|堡|主食/.test(t)) slots.push('main');
+  const softRe = /(?:最好|最好能|最好有|如果能|要是能|希望|最好再来|可以的话|顺便)/;
+  const isSoft = (kw: string): boolean => {
+    // 该槽位关键词是否被软化词修饰
+    const idx = t.indexOf(kw);
+    if (idx < 0) return false;
+    const before = t.slice(Math.max(0, idx - 8), idx);
+    return softRe.test(before);
+  };
+  if (/汉堡|堡|主食/.test(t) && !isSoft('汉堡') && !isSoft('堡')) slots.push('main');
   if (/小食|薯条|鸡块|鸡翅/.test(t)) slots.push('side');
-  if (/饮料|喝的|可乐|咖啡|饮品/.test(t)) slots.push('drink');
+  if (/饮料|喝的|可乐|咖啡|饮品/.test(t) && !isSoft('饮料') && !isSoft('喝的')) slots.push('drink');
   if (/甜品|派|冰淇淋|新地/.test(t)) slots.push('dessert');
   c.requiredSlots = slots;
 
