@@ -28,51 +28,84 @@
 
 ---
 
-## 🚀 安装与运行
+## 🚀 在 WorkBuddy 中使用（推荐）
+
+这是本项目的**主要使用方式**——不用装依赖、不用跑脚本，配置好就能直接对话。
+
+### 1. 申请 MCP Token
+
+访问 <https://open.mcd.cn/mcp> → 登录 → 右上角「控制台」→「激活」，拿到 Token。
+
+### 2. 配置 mcd-mcp 连接器
+
+WorkBuddy 左侧栏「**专家 · 技能 · 连接器**」→「连接器」→ 右上角「自定义连接器」→「配置 MCP」，
+把 [`mcp-config.example.json`](./mcp-config.example.json) 的内容粘进去，
+将 `${MCD_MCP_TOKEN}` 替换成上一步拿到的真实 Token，保存后启用 `mcd-mcp`。
+
+### 3. 安装 Skill
+
+```bash
+git clone --depth 1 https://github.com/RSS1102/mcd-smart-order.git \
+  ~/.workbuddy/skills/mcd-smart-order
+```
+
+装好后的最小结构：
+
+```
+~/.workbuddy/skills/mcd-smart-order/
+└── SKILL.md          # 必需：Skill 描述与工作流规则
+```
+
+> 💡 **只拷一个 `SKILL.md` 过去也够用。** Skill 的规则全在这份文件里，Agent 会按它
+> 直接调 MCP 工具完成任务，**不需要跑本项目任何代码**。
+> `src/` 是可选的参考实现，用于精确的组合求解与回归验证（见下一节）。
+
+### 4. 开始对话
+
+不用记命令，直接说需求：
+
+> **你**：我在深圳科技园，想吃汉堡薯条可乐，在减肥，800 大卡以内
+>
+> **助手**：列出附近门店 → 你挑一家 → 给出 2-3 个满足全部约束的方案（含热量与价格）
+> 　　　　→ 拉套餐规格让你确认 → 出订单确认单 → 你说「确认下单」
+> 　　　　→ 创建订单 → 引导你去「麦当劳 APP → 订单 → 立即支付」
+
+`SKILL.md` 的 `description` 里写了触发场景，Agent 会自动匹配，例如：
+
+- 「我想吃麦当劳」「帮我点一份」
+- 「预算 30 元吃什么」「600 大卡怎么搭配」
+- 「我牛奶过敏能吃什么」「附近哪家店能自提」
+
+> 地址和取餐时间**不是脚本入参**，是 Agent 在对话里问出来、你选出来的。
+
+---
+
+## 💻 命令行安装与使用
+
+想跑代码、做回归验证、或把能力集成到自己的系统时走这条。
 
 ### 前置条件
 
-1. 申请 MCP Token：访问 https://open.mcd.cn/mcp → 登录 → 右上角「控制台」→ 「激活」
+1. 申请 MCP Token（同上一节第 1 步）
 2. Node.js ≥ 20.10（推荐 22 LTS）
 
 ### 安装
 
 ```bash
-git clone <your-repo-url>
+git clone https://github.com/RSS1102/mcd-smart-order.git
 cd mcd-smart-order
 npm install
 ```
 
 ### 配置 Token
 
-复制示例配置并把占位符替换为环境变量（**不要把真实 Token 写进仓库**）：
-
 ```bash
 export MCD_MCP_TOKEN="<你的 MCP Token>"
 ```
 
-在 WorkBuddy 中使用：左侧栏「专家·技能·连接器」→「连接器」→ 右上角「自定义连接器」→「配置 MCP」，
-填入 `mcp-config.example.json` 的内容并把 `${MCD_MCP_TOKEN}` 换成实际 Token，保存后启用 `mcd-mcp`。
+**不要把真实 Token 写进仓库** —— `mcp-config.example.json` 里只有 `${MCD_MCP_TOKEN}` 占位符。
 
-### 作为 Skill 使用（正常方式）
-
-什么都不用预设，直接对话。门店和取餐时间由**你在对话中提供**：
-
-> **你**：我在深圳科技园，帮我点个麦当劳，今晚 6 点自提
->
-> **助手**：调用 `query-nearby-stores` 列出附近门店 → 你挑一家
-> 　　　　再原样列出该店的 `reservationTimeOptions` → 你挑一个时段
-
-选完餐品后：
-
-> **助手**：给出订单确认单（门店 / 餐品 / 规格 / 合计 / 热量）
-> **你**：确认下单
-> **助手**：创建订单 → 告知订单号、应付金额、15 分钟支付截止
-> 　　　　→ 引导你去「麦当劳 APP → 订单 → 立即支付」
-
-地址、时间**不是脚本入参**，是 Agent 问出来、你选出来的。完整规则见 [`SKILL.md`](./SKILL.md)。
-
-### 命令（开发验证用）
+### 构建与测试
 
 ```bash
 npm run typecheck     # 类型检查（strict）
@@ -80,9 +113,10 @@ npm run test          # 143 项单元测试，基于真实门店快照，离线�
 npm run build         # 编译到 dist/
 ```
 
-下面的 CLI 是我**直连真实 MCP 做回归验证**用的，不是运行 Skill 的必需步骤。
-`--city` / `--keyword` / `--reserve` 只是为了让脚本无人值守跑通而写死的示例值，
-真实使用时这些值来自对话：
+### CLI 命令
+
+下面这些是我**直连真实 MCP 做回归验证**用的。`--city` / `--keyword` / `--reserve`
+只是为了让脚本无人值守跑通而写死的示例值，真实使用时这些值来自对话：
 
 ```bash
 node dist/src/cli.js menu      --city 深圳市 --keyword 科技园
@@ -91,12 +125,10 @@ node dist/src/cli.js compile   --city 深圳市 --keyword 科技园 \
 node dist/src/cli.js nutrition --city 深圳市 --keyword 科技园 --kcal 650 --preset highProtein
 node dist/src/cli.js pickup    --city 深圳市 --keyword 科技园 --reserve "2026-10-09 18:00"
 node dist/src/cli.js delivery                # 外送：查地址 → 查可配送门店
-node dist/src/cli.js order --code 515837      # 下单（默认 dry-run，只构造参数不发送）
+node dist/src/cli.js order --code 515837     # 下单（默认 dry-run，只构造参数不发送）
 ```
 
 > 小技巧：`query-nearby-stores` 传 `searchType=1` 可查**收藏餐厅**，连地址都不用报。
-
----
 
 ## 💡 使用示例
 

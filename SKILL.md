@@ -924,6 +924,11 @@ metadata:
 
 ## 7. 参考实现
 
+> 📌 **本节是可选的。** 本 Skill 只靠这个 `SKILL.md` 就能完整运行 —— 规则都在上文，
+> 你直接调 MCP 工具即可，**不需要读取或运行任何代码**。
+> 下面的 `src/` 是给人类用的参考实现（精确组合求解 + 回归验证），
+> **未安装时请忽略本节**，按 **§4.6「纯 prompt 降级路径」** 执行（§3 也有同类说明）。
+
 `src/` 下是可直接运行的 TypeScript 实现（与上文规则一一对应）：
 
 | 文件 | 职责 |
@@ -933,10 +938,12 @@ metadata:
 | `src/errors.ts` | 错误分类与用户话术 |
 | `src/constraints.ts` | 过敏原/忌口/口味知识库、槽位提取、硬过滤 |
 | `src/compiler.ts` | 预算＋偏好编译器（查询计划 / 搜索 / 松弛阶梯） |
-| `src/nutrition.ts` | 营养表解析、名称匹配、配比求解 |
+| `src/nutrition.ts` | 营养表解析、名称匹配、配比求解、套餐子项加总 |
 | `src/pickup.ts` | 门店选择、营业/预约时段校验、自提流程 |
 | `src/order.ts` | 下单与支付：确认单、下单前复核、幂等下单、支付二维码、支付结果核实 |
 | `src/cli.ts` | CLI：`menu / compile / nutrition / pickup / delivery / order` |
+
+单元测试：`npm run test`（143 项，全部基于真实门店与菜单快照，离线可跑）。
 
 单元测试：`npm run test`（121 项，全部基于真实门店与菜单快照）。
 
