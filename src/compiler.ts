@@ -184,17 +184,33 @@ function sumOf(items: MealView[]): Nutrition {
   );
 }
 
+/**
+ * 用户**点名**的具体品类（「想有可乐和薯条」）权重高于泛口味偏好。
+ *
+ * 原因：泛偏好是「倾向」，点名是「我要这个」。若都按 10 分算，
+ * 一个省 ¥13 的套餐（套餐奖励 12 + 省钱 15）会压过「汉堡+薯条+可乐」的
+ * 正确组合（品类命中仅 20），用户就拿不到自己说的东西。
+ */
+const NAMED_ITEM_WEIGHT: Record<string, number> = {
+  可乐: 16,
+  薯条: 16,
+};
+
 function tasteScore(items: MealView[], tastes: string[]): { hits: string[]; score: number } {
   const hits = new Set<string>();
   let score = 0;
-  for (const it of items) {
-    const text = normalizeName([it.name, ...it.tags, ...it.categories].join('|'));
-    for (const t of tastes) {
-      const words = TASTE_RULES[t] ?? [t];
-      if (words.some((w) => text.includes(normalizeName(w)))) {
-        hits.add(t);
-        score += 10;
-      }
+  // 每个偏好**只计一次**。此前是每个命中餐品都加 10，导致
+  // 「低卡」在玉米杯、无糖可乐上各加一次（+20），把用户点名的「薯条」压下去。
+  // 偏好是「这套餐有没有满足」，不是「命中了几件」。
+  for (const t of tastes) {
+    const words = TASTE_RULES[t] ?? [t];
+    const hit = items.some((it) => {
+      const text = normalizeName([it.name, ...it.tags, ...it.categories].join('|'));
+      return words.some((w) => text.includes(normalizeName(w)));
+    });
+    if (hit) {
+      hits.add(t);
+      score += NAMED_ITEM_WEIGHT[t] ?? 10;
     }
   }
   return { hits: [...hits], score };
@@ -211,10 +227,18 @@ export function evaluateCombo(items: MealView[], c: Constraints, rule: BudgetRul
   const reasons: string[] = [];
   let score = tScore;
 
+  // 减脂意图：用户明确说了「减肥/低卡/减脂」时，排序取向要变
+  const lowCalIntent = c.tastes.includes('低卡');
+
   // 预算利用率：越接近上限越好，但不越界
+  //
+  // 权重随意图变化：减脂用户的首要目标是热量，不是把预算花满。
+  // 若仍给 40 分权重，「省 ¥29 的 707 kcal 厚牛堡」会压过「贵 ¥8 的 600 kcal 组合」——
+  // 实测就是这个问题。
   if (c.budgetMax) {
     const util = totalPrice / c.budgetMax;
-    score += Math.max(0, 40 * (1 - Math.abs(1 - util)));
+    const w = lowCalIntent ? 15 : 40;
+    score += Math.max(0, w * (1 - Math.abs(1 - util)));
     if (util <= 1) reasons.push(`预算利用率 ${(util * 100).toFixed(0)}%`);
   }
   // 折扣
@@ -223,11 +247,33 @@ export function evaluateCombo(items: MealView[], c: Constraints, rule: BudgetRul
     score += Math.min(15, saved * 1.5);
     reasons.push(`较原价省 ¥${saved.toFixed(1)}`);
   }
-  // 热量：不超上限且尽量贴近
+  // 热量
+  //
+  // 两种情况取向相反：
+  //   · 只给了上限、没提减脂 → 「贴近上限」更实在（用户想吃够这个量）
+  //   · 明确说了减肥/低卡     → 上限是天花板不是目标，但**也不是越低越好**
+  //
+  // 实测教训：第一版按「越低越好」排，结果 Top-1 是 213 kcal 的麦乐鸡套餐 ——
+  // 那是挨饿不是减肥。800 kcal 的 50%（=400）作为「一顿正餐」的合理下限，
+  // 低于它扣分，高于它在区间内越低越好。
   if (c.calorieMax) {
     const fill = total.energyKcal / c.calorieMax;
-    if (fill <= 1) score += 20 * fill;
-    else score -= 60 * (fill - 1);
+    if (fill <= 1) {
+      if (lowCalIntent) {
+        const minMeal = c.calorieMax * 0.5;
+        if (total.energyKcal < minMeal) {
+          score -= 40; // 明显不足一顿正餐，压到后面
+          reasons.push(`${Math.round(total.energyKcal)} kcal，不足一顿正餐（建议 ≥ ${Math.round(minMeal)}）`);
+        } else {
+          score += 30 * (1 - fill);
+          reasons.push(`${Math.round(total.energyKcal)} kcal，低于上限 ${c.calorieMax}`);
+        }
+      } else {
+        score += 20 * fill;
+      }
+    } else {
+      score -= 60 * (fill - 1);
+    }
   }
   // 配比
   if (c.macroPreset) {
@@ -426,6 +472,14 @@ export interface CompileOptions {
    * 不在此处直接调 MCP 是为了保持 compiler 是纯函数（离线可测）。
    */
   comboExclusions?: Map<string, string>;
+  /**
+   * 由调用方**拆子项加总**得到的套餐真实营养（见 `nutritionOfCombo`）。
+   *
+   * 为什么需要：套餐名只描述主食，按名称匹配会命中单品数值
+   * （「培根蔬萃双层牛堡三件套」→ 442 kcal，真实 878 kcal），
+   * 用它做热量约束会把超标套餐推荐给减脂用户。
+   */
+  comboNutrition?: Map<string, Nutrition>;
 }
 
 /** 主入口：编译 + 求解 */
@@ -446,6 +500,18 @@ export function compileOrder(
     for (const v of views) {
       const why = opts.comboExclusions.get(v.code);
       if (why && v.excluded.length === 0) v.excluded = [why];
+    }
+  }
+
+  // 并入外部拆解出的套餐真实营养（覆盖 null，不覆盖单品）
+  if (opts.comboNutrition?.size) {
+    for (const v of views) {
+      if (!v.isCombo) continue;
+      const n = opts.comboNutrition.get(v.code);
+      if (n) {
+        v.nutrition = n;
+        v.nutritionMatch = 'contains';
+      }
     }
   }
 

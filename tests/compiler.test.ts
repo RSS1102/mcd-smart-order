@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { compileOrder, checkCombo, ruleForBudget, renderResult } from '../src/compiler.js';
+import { compileOrder, checkCombo, evaluateCombo, ruleForBudget, renderResult } from '../src/compiler.js';
 import {
   ALLERGEN_RULES,
   applyHardFilters,
@@ -10,6 +10,7 @@ import {
   type Constraints,
 } from '../src/constraints.js';
 import { CHANNEL, loadMenu, loadNutrition } from './helpers.js';
+import { buildNutritionIndex, nutritionOfCombo } from '../src/nutrition.js';
 
 const menu = loadMenu();
 const nutri = loadNutrition();
@@ -417,5 +418,133 @@ describe('子项选中判据（isDefault 或 quantity>=1）', () => {
     expect(names).toContain('麦乐鸡-5块'); // 关键：isDefault=0 但被选中
     expect(names).toContain('脆皮鸡柳3根');
     expect(names).not.toContain('玉米杯'); // quantity=0 未选中
+  });
+});
+
+describe('减脂意图的识别与排序取向（回归锁死）', () => {
+  it('「减肥」「减脂」「低卡」「控卡」都要识别为低卡偏好', () => {
+    for (const text of ['今天想减肥', '想减脂', '要低卡', '帮我控卡', '来个低热量的']) {
+      expect(extractConstraints(text).tastes, `「${text}」应识别为低卡`).toContain('低卡');
+    }
+  });
+
+  it('「低卡」不需要前置动词（用户不会说「我喜欢低卡」）', () => {
+    expect(extractConstraints('今天减肥，想吃汉堡').tastes).toContain('低卡');
+  });
+
+  const view = (name: string, price: number, kcal: number, fat: number): MeerViewLike => ({
+    code: name,
+    name,
+    price,
+    originalPrice: price * 1.4,
+    categories: [],
+    slots: ['main', 'side', 'drink'],
+    tags: [],
+    excluded: [],
+    nutrition: {
+      productName: name,
+      nutritionDescription: null,
+      energyKj: kcal * 4.184,
+      energyKcal: kcal,
+      protein: kcal * 0.15 / 4,
+      fat,
+      carbohydrate: (kcal - fat * 9) / 4,
+      sodium: 800,
+      calcium: 100,
+    },
+    canWithOrder: false,
+    image: '',
+    nutritionMatch: 'exact' as const,
+    isCombo: true,
+  });
+
+  const rule = ruleForBudget(undefined);
+
+  it('减脂意图下，429 kcal 应排在 707 kcal 之前', () => {
+    const lean = evaluateCombo([view('轻食套餐', 34, 429, 15)], { ...defaultConstraints(), calorieMax: 800, tastes: ['低卡'] }, rule);
+    const heavy = evaluateCombo([view('厚牛堡套餐', 37, 707, 44)], { ...defaultConstraints(), calorieMax: 800, tastes: ['低卡'] }, rule);
+    expect(lean.score, '低卡方案应得分更高').toBeGreaterThan(heavy.score);
+  });
+
+  it('减脂意图下，热量远低于一顿正餐要被压后（不是越低越好）', () => {
+    const tooLittle = evaluateCombo([view('麦乐鸡套餐', 25, 213, 12)], { ...defaultConstraints(), calorieMax: 800, tastes: ['低卡'] }, rule);
+    const reasonable = evaluateCombo([view('吉士汉堡套餐', 34, 429, 15)], { ...defaultConstraints(), calorieMax: 800, tastes: ['低卡'] }, rule);
+    expect(reasonable.score, '429 kcal 应优于 213 kcal').toBeGreaterThan(tooLittle.score);
+    expect(tooLittle.reasons.join()).toContain('不足一顿正餐');
+  });
+
+  it('未提减脂时保持原取向：热量贴近上限得分更高', () => {
+    const close = evaluateCombo([view('饱腹套餐', 34, 760, 30)], { ...defaultConstraints(), calorieMax: 800 }, rule);
+    const light = evaluateCombo([view('轻食套餐', 34, 430, 15)], { ...defaultConstraints(), calorieMax: 800 }, rule);
+    expect(close.score).toBeGreaterThan(light.score);
+  });
+});
+
+type MeerViewLike = Parameters<typeof evaluateCombo>[0][number];
+
+describe('槽位推导与套餐判定（回归锁死）', () => {
+  const mk = (name: string) =>
+    buildMealViews(
+      { categories: [], meals: { x: { name, currentPrice: '10', originalPrice: '10' } } } as never,
+      [],
+    )[0]!;
+
+  it('「V翅」必须归小食，不能因大小写漏配而落到主食', () => {
+    // normalizeName 会 toLowerCase，正则必须带 i，否则「薄皮焦香V翅」→「v翅」匹配不上，
+    // 落到分类名兜底（「炸鸡」→ main），用户要汉堡却拿到 10 个鸡翅
+    expect(mk('薄皮焦香V翅').slots).toContain('side');
+    expect(mk('薄皮焦香V翅').slots).not.toContain('main');
+    expect(mk('薄皮V翅双拼十翅').slots).toContain('side');
+  });
+
+  it('「麦乐鸡」归小食', () => {
+    expect(mk('麦乐鸡').slots).toContain('side');
+    expect(mk('麦乐鸡').slots).not.toContain('main');
+  });
+
+  it('「双拼/拼盘」不算套餐（纯小食组合不含主食与饮料）', () => {
+    expect(mk('薄皮V翅双拼十翅').isCombo).toBe(false);
+    expect(mk('BFF四宫格小食盘').isCombo).toBe(false);
+  });
+
+  it('真套餐仍然识别为套餐并覆盖三槽位', () => {
+    const v = mk('培根蔬萃双层牛堡三件套');
+    expect(v.isCombo).toBe(true);
+    expect(v.slots).toEqual(expect.arrayContaining(['main', 'side', 'drink']));
+  });
+});
+
+describe('套餐营养必须拆子项加总', () => {
+  it('按名称匹配套餐会低估近一倍，必须返回 null', () => {
+    const views = buildMealViews(loadMenu(), loadNutrition());
+    const combo = views.find((v) => v.name.includes('培根蔬萃双层牛堡三件套'));
+    expect(combo?.isCombo).toBe(true);
+    expect(combo?.nutrition).toBeNull();
+  });
+
+  it('nutritionOfCombo 把汉堡+薯条+可乐加总，而不是取汉堡单品值', () => {
+    const idx = buildNutritionIndex(loadNutrition());
+    const detail = {
+      rounds: [
+        { name: '主食', choices: [{ name: '培根蔬萃双层牛堡', isDefault: 1, quantity: 1 }] },
+        { name: '小食', choices: [{ name: '中薯条', isDefault: 1, quantity: 1 }] },
+        { name: '饮料', choices: [{ name: '可乐中杯', isDefault: 1, quantity: 1 }] },
+      ],
+    };
+    const r = nutritionOfCombo(detail, idx);
+    expect(r.nutrition).not.toBeNull();
+    // 442 + 289 + 147 = 878，而不是 442
+    expect(r.nutrition!.energyKcal).toBe(878);
+    expect(r.items).toHaveLength(3);
+  });
+
+  it('有子项查不到时整体返回 null（不用近似值冒充）', () => {
+    const idx = buildNutritionIndex(loadNutrition());
+    const detail = {
+      rounds: [{ name: '主食', choices: [{ name: '不存在的限定新品', isDefault: 1, quantity: 1 }] }],
+    };
+    const r = nutritionOfCombo(detail, idx);
+    expect(r.nutrition).toBeNull();
+    expect(r.missing).toContain('不存在的限定新品');
   });
 });

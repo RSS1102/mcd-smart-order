@@ -53,10 +53,22 @@ describe('名称归一化与匹配', () => {
     expect(m?.nutrition.energyKcal).toBe(513);
   });
 
-  it('真实菜单的匹配覆盖率 > 40%', () => {
-    const views = buildMealViews(loadMenu(), loadNutrition());
+  it('真实菜单中单品的匹配覆盖率 > 40%', () => {
+    // 只统计单品：套餐的营养**不允许**按名称匹配（会命中单品数值，
+    // 「培根蔬萃双层牛堡三件套」442 vs 真实 878），必须拆子项加总。
+    const views = buildMealViews(loadMenu(), loadNutrition()).filter((v) => !v.isCombo);
     const hit = views.filter((v) => v.nutritionMatch !== 'none');
     expect(hit.length / views.length).toBeGreaterThan(0.4);
+  });
+
+  it('套餐不得按名称匹配营养（避免低估近一倍）', () => {
+    const views = buildMealViews(loadMenu(), loadNutrition());
+    const combos = views.filter((v) => v.isCombo);
+    expect(combos.length).toBeGreaterThan(0);
+    for (const c of combos) {
+      expect(c.nutrition, `套餐「${c.name}」不应有名称匹配的营养`).toBeNull();
+      expect(c.nutritionMatch).toBe('none');
+    }
   });
 });
 

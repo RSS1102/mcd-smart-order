@@ -179,6 +179,11 @@ export const TASTE_RULES: Record<string, string[]> = {
   清爽: ['柠檬', '红茶', '橙', '苹果汁', '无糖', '玉米'],
   甜: ['派', '新地', '麦旋风', '冰淇淋'],
   低卡: ['无糖', '玉米', '迷你', '小杯', '小薯条'],
+  // 品类偏好：用户说「想有可乐和薯条」时，让含这两样的方案往前排。
+  // 注意：套餐名不描述成分（「牛气满满套餐」不含「可乐」二字），
+  // 所以这类偏好只对单品生效，会把「汉堡+薯条+可乐」的自由组合排到套餐前面。
+  可乐: ['可乐'],
+  薯条: ['薯条'],
 };
 
 /** 素食排除关键词 */
@@ -208,10 +213,13 @@ export function slotOfCategory(categoryName: string): SlotName | null {
 }
 
 const ITEM_SLOT: Array<{ re: RegExp; slot: SlotName }> = [
-  { re: /(堡|汉堡|麦满分|卷)$/, slot: 'main' },
-  { re: /(薯条|薯饼|薯格|扭扭薯|玉米杯|鸡块|鸡翅|鸡排|洋葱圈|芝士条)$/, slot: 'side' },
-  { re: /(派|新地|麦旋风|冰淇淋|圆筒)$/, slot: 'dessert' },
-  { re: /(可乐|雪碧|咖啡|红茶|绿茶|果汁|牛奶|玉米|拿铁|奶铁|美式|酷|柠檬水|怡泉|气泡水)$/, slot: 'drink' },
+  // ⚠️ 必须带 `i`：normalizeName 会 toLowerCase，菜单里的「V翅」到这里已是「v翅」，
+  // 用大写 V 写正则永远匹配不上，会落到分类名兜底（「炸鸡」→ 主食），
+  // 导致「想吃汉堡」的用户拿到 10 个鸡翅。
+  { re: /(堡|汉堡|麦满分|卷)$/i, slot: 'main' },
+  { re: /(薯条|薯饼|薯格|扭扭薯|玉米杯|麦乐鸡|鸡块|鸡翅|鸡排|鸡柳|v翅|十翅|洋葱圈|芝士条)$/i, slot: 'side' },
+  { re: /(派|新地|麦旋风|冰淇淋|圆筒)$/i, slot: 'dessert' },
+  { re: /(可乐|雪碧|咖啡|红茶|绿茶|果汁|牛奶|玉米|拿铁|奶铁|美式|酷|柠檬水|怡泉|气泡水)$/i, slot: 'drink' },
 ];
 
 export function slotOfItem(itemName: string): SlotName | null {
@@ -288,14 +296,38 @@ export function buildMealViews(menu: Menu, nutritionList: Nutrition[]): MealView
     const tags = [...new Set(cats.flatMap((c) => c.tags))];
     const text = haystack(m.name, tags, catNames);
     const slots = new Set<SlotName>();
-    for (const cn of catNames) {
-      const s = slotOfCategory(cn);
-      if (s) slots.add(s);
-    }
+    // 名称优先：名称已能明确槽位时，**不再用分类名兜底**。
+    //
+    // 原因：分类名「鸡肉汉堡\n/卷」下既有汉堡也有麦乐鸡、鸡翅，
+    // 若两者都加，麦乐鸡会同时是 side 和 main，最后被当成主食推荐给
+    // 「想吃汉堡」的用户。这与 §4.0 移除分类名的教训是同一个。
     const is = slotOfItem(m.name);
-    if (is) slots.add(is);
-    const nm = matchNutrition(m.name, idx);
-    const isCombo = COMBO_RE.test(m.name) || catNames.some((n) => /套餐|单人餐|双人餐|拼盘|乐园餐/.test(n));
+    if (is) {
+      slots.add(is);
+    } else {
+      for (const cn of catNames) {
+        const s = slotOfCategory(cn);
+        if (s) slots.add(s);
+      }
+    }
+    // 套餐判据要严：套餐 = 主食 + 小食 + 饮料的完整组合。
+    //
+    // 「拼盘 / 双拼」**不能算套餐** —— 「薄皮V翅双拼十翅」是 10 个鸡翅，
+    // 既没有主食也没有饮料，若被当套餐会直接加入 main+side+drink 三个槽位，
+    // 成为「完整解」被推荐给「想吃汉堡」的用户。
+    const isCombo =
+      /件套|套餐|双人餐|三人餐|四人餐|全家桶|乐园餐|随心配|超值餐|欢乐餐/.test(m.name) ||
+      catNames.some((n) => /套餐|单人餐|双人餐|乐园餐/.test(n));
+
+    // 🔴 套餐的营养**不能按名称匹配**。
+    //
+    // 「培根蔬萃双层牛堡三件套」会被模糊匹配到「培根蔬萃双层牛堡」= 442 kcal，
+    // 而真实套餐是 汉堡 442 + 中薯条 289 + 可乐 147 = 878 kcal —— 低估近一倍。
+    // 用户以为在 800 上限内，实际超了 78 kcal。
+    //
+    // 套餐营养必须拆子项加总（见 `nutritionOfCombo`，需 query-meal-detail）。
+    // 在拿到子项数据之前，宁可标记为「未知」，也不能拿单品数值冒充。
+    const nm = isCombo ? null : matchNutrition(m.name, idx);
     // 套餐自身即覆盖 主食+小食+饮料(+甜品)，让它单独就能满足多槽位要求
     const finalSlots = new Set<SlotName>(slots);
     if (isCombo) {
@@ -486,8 +518,21 @@ const TASTE_SYNONYMS: Record<string, string> = {
   辣: '辣', 辣的: '辣', 微辣: '辣', 重口: '辣',
   芝士: '芝士', 奶酪: '芝士', 牛肉: '牛肉', 牛: '牛肉',
   鸡肉: '鸡肉', 鸡: '鸡肉', 鱼: '鱼', 咖啡: '咖啡',
-  清爽: '清爽', 清淡: '清爽', 甜: '甜', 甜品: '甜', 低卡: '低卡', 低热量: '低卡', 减脂: '低卡',
+  清爽: '清爽', 清淡: '清爽', 甜: '甜', 甜品: '甜',
+  低卡: '低卡', 低热量: '低卡', 减脂: '低卡', 减肥: '低卡',
+  控卡: '低卡', 低脂: '低卡', 少油: '低卡', 瘦身: '低卡',
+  可乐: '可乐', 薯条: '薯条',
 };
+
+/**
+ * 「饮食目标型」偏好词：出现即算，**不需要**前置动词。
+ *
+ * 为什么单独列：用户不会说「我喜欢低卡」，而是直接说「今天减肥」「想控卡」。
+ * 按通用规则要求前置「喜欢/想吃/偏好」，这类诉求会被完全丢弃 ——
+ * 实测「我想吃个汉堡，今天想减肥」的 tastes 为空，导致排序只剩省钱与预算利用率，
+ * 最终把 707 kcal、脂肪 44g 的厚牛堡排在第一位。
+ */
+const STANDALONE_TASTES = new Set(['低卡']);
 
 const AVOID_SYNONYMS: Record<string, string> = {
   辣: '辣', 香菜: '香菜', 洋葱: '洋葱', 生菜: '生菜', 酸黄瓜: '酸黄瓜', 黄瓜: '酸黄瓜',
@@ -529,6 +574,11 @@ export function extractConstraints(utterance: string): Constraints {
   }
   // 口味偏好
   for (const [syn, key] of Object.entries(TASTE_SYNONYMS)) {
+    // 饮食目标型（低卡/减脂/减肥…）：出现即算，不要求前置动词
+    if (STANDALONE_TASTES.has(key) && t.includes(syn)) {
+      if (!c.tastes.includes(key)) c.tastes.push(key);
+      continue;
+    }
     if (/(?:喜欢|爱吃|想吃|想要|偏好|来点|要)/.test(t) && t.includes(syn) && !c.tastes.includes(key)) {
       c.tastes.push(key);
     } else if (t.includes(`喜欢${syn}`) || t.includes(`爱吃${syn}`) || t.includes(`想吃${syn}`)) {

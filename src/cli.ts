@@ -15,7 +15,7 @@
 import { McdClient } from './mcp-client.js';
 import { compileOrder, renderResult } from './compiler.js';
 import { applyHardFilters, buildMealViews, defaultConstraints, extractConstraints, scanSubItems } from './constraints.js';
-import { MACRO_PRESETS, buildNutritionIndex, matchNutrition, planNutrition } from './nutrition.js';
+import { MACRO_PRESETS, buildNutritionIndex, matchNutrition, nutritionOfCombo, planNutrition } from './nutrition.js';
 import { checkBusinessHours, checkReservationSlot, pickStore, planPickup, renderPickupPlan } from './pickup.js';
 import {
   checkPayment,
@@ -26,7 +26,7 @@ import {
   renderPayGuide,
 } from './order.js';
 import { McdError } from './errors.js';
-import type { BeType } from './types.js';
+import type { BeType, Nutrition } from './types.js';
 import type { MacroPresetName } from './constraints.js';
 
 function arg(name: string, def?: string): string | undefined {
@@ -51,8 +51,11 @@ async function deepScanCombos(
   channel: { storeCode: string; orderType: 1 | 2; beType: BeType },
   c: ReturnType<typeof defaultConstraints>,
   maxRounds: number,
-): Promise<Map<string, string>> {
+  nutritionIdx?: ReturnType<typeof buildNutritionIndex>,
+): Promise<{ exclusions: Map<string, string>; nutrition: Map<string, Nutrition>; nutritionNotes: string[] }> {
   const out = new Map<string, string>();
+  const nut = new Map<string, Nutrition>();
+  const notes: string[] = [];
 
   // 只对看起来像套餐的 code 下钻（套餐 code 与单品 code 段位不同，这里按名称特征 + 全量兜底）
   const comboCodes = Object.entries(menu.meals)
@@ -71,6 +74,15 @@ async function deepScanCombos(
         if (hits.length) {
           out.set(code, `子项不可用（${hits.map((h) => `${h.where} ${h.reason}`).join('、')}）`);
           found++;
+          continue;
+        }
+        // 顺带算套餐真实营养（拆子项加总，不能按套餐名匹配）
+        if (nutritionIdx) {
+          const nr = nutritionOfCombo(d, nutritionIdx);
+          if (nr.nutrition) nut.set(code, nr.nutrition);
+          else if (nr.missing.length) {
+            notes.push(`${menu.meals[code]?.name ?? code}：子项营养缺失（${nr.missing.slice(0, 3).join('、')}），热量未知`);
+          }
         }
       } catch {
         // 详情取不到（售罄/不在当前时段菜单）：不因此排除，交给后续算价层报错
@@ -78,7 +90,7 @@ async function deepScanCombos(
     }
     if (found === 0) break; // 本轮无新增，结果已稳定
   }
-  return out;
+  return { exclusions: out, nutrition: nut, nutritionNotes: notes };
 }
 
 async function resolveStore(client: McdClient, beType: 1 | 5 = 1) {
@@ -121,17 +133,26 @@ async function main(): Promise<void> {
     console.log(`门店：${store.storeName}（${store.storeCode}）`);
     console.log(`解析到的约束：${JSON.stringify({ ...c, requiredSlots: c.requiredSlots }, null, 1)}\n`);
 
-    // 下钻套餐子项：套餐名只描述主食，名称层过滤会漏判
-    const exclusions = await deepScanCombos(client, menu, channel, c, 3);
-    if (exclusions.size) {
-      console.log(`🔎 下钻 ${exclusions.size} 个餐品的组成子项，发现不可用：`);
-      for (const [code, why] of exclusions) {
+    // 下钻套餐子项：套餐名只描述主食，名称层过滤会漏判；顺带算真实营养
+    const nutriIdx = buildNutritionIndex(nutri);
+    const scan = await deepScanCombos(client, menu, channel, c, 3, nutriIdx);
+    if (scan.exclusions.size) {
+      console.log(`🔎 下钻 ${scan.exclusions.size} 个餐品的组成子项，发现不可用：`);
+      for (const [code, why] of scan.exclusions) {
         console.log(`   ✗ ${menu.meals[code]?.name ?? code}（${code}）—— ${why}`);
       }
       console.log();
     }
+    if (scan.nutritionNotes.length) {
+      for (const n of scan.nutritionNotes) console.log(`⚠️ ${n}`);
+      console.log();
+    }
 
-    const r = compileOrder(menu, nutri, channel, c, { topK: 3, comboExclusions: exclusions });
+    const r = compileOrder(menu, nutri, channel, c, {
+      topK: 3,
+      comboExclusions: scan.exclusions,
+      comboNutrition: scan.nutrition,
+    });
     console.log(renderResult(r));
     console.log(`\n[统计] 搜索 ${r.stats.searched} 个组合，剪枝 ${r.stats.pruned} 次`);
     return;

@@ -372,3 +372,64 @@ export function planNutrition(
     )
     .slice(0, topK);
 }
+
+/* ------------------------------------------------------------------ */
+/* 套餐营养：必须拆子项加总                                             */
+/* ------------------------------------------------------------------ */
+
+export interface ComboNutritionResult {
+  /** 加总后的营养；有子项查不到时为 null */
+  nutrition: Nutrition | null;
+  /** 参与加总的子项 */
+  items: Array<{ name: string; kcal: number; level: string }>;
+  /** 查不到营养的子项（会导致 nutrition 为 null） */
+  missing: string[];
+}
+
+/**
+ * 计算套餐的真实营养：遍历每一轮**实际会被装进这单**的子项，逐个匹配后加总。
+ *
+ * 为什么必须这样做：套餐名只描述主食，「培根蔬萃双层牛堡三件套」按名称模糊匹配会
+ * 命中「培根蔬萃双层牛堡」的 442 kcal，而真实套餐是 442 + 中薯条 289 + 可乐 147
+ * = 878 kcal。用它做热量约束会把超标的套餐推荐给减脂用户。
+ *
+ * @param detail query-meal-detail 返回
+ * @param idx    营养索引
+ * @param requireAll 默认 true：任一子项查不到就整体返回 null（不用近似值凑）
+ */
+export function nutritionOfCombo(
+  detail: { rounds?: Array<{ name?: string; choices?: Array<{ name?: string; isDefault?: number; quantity?: number }> }> },
+  idx: ReturnType<typeof buildNutritionIndex>,
+  requireAll = true,
+): ComboNutritionResult {
+  const items: Array<{ name: string; kcal: number; level: string }> = [];
+  const missing: string[] = [];
+
+  for (const r of detail.rounds ?? []) {
+    for (const ch of r.choices ?? []) {
+      if (!ch.name) continue;
+      // 与 scanSubItems 同一判据：isDefault=1 或 quantity>=1 才是「会装进这单」
+      const selected = ch.isDefault === 1 || (ch.quantity ?? 0) >= 1;
+      if (!selected) continue;
+
+      const m = matchNutrition(ch.name, idx);
+      if (m) items.push({ name: ch.name, kcal: m.nutrition.energyKcal, level: m.level });
+      else missing.push(ch.name);
+    }
+  }
+
+  if (items.length === 0) return { nutrition: null, items, missing };
+  if (missing.length && requireAll) return { nutrition: null, items, missing };
+
+  const total = sumNutrition(
+    items.map((i) => {
+      const m = matchNutrition(i.name, idx)!;
+      return m.nutrition;
+    }),
+  );
+  return {
+    nutrition: { ...total, productName: '套餐合计（子项加总）' },
+    items,
+    missing,
+  };
+}
