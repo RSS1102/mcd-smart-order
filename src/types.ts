@@ -317,3 +317,67 @@ export interface CreateOrderInput extends ChannelParams {
     membershipSpecId?: string;
   };
 }
+
+/* ------------------------------------------------------------------ */
+/* 6. 下单与支付                                                        */
+/* ------------------------------------------------------------------ */
+
+/** 订单状态码（来自 create-order / query-order 的 outputSchema） */
+export type OrderStatus =
+  | '1' // 待支付
+  | '2' // 配餐中-已支付
+  | '4' // 配送中
+  | '6' // 已完成
+  | '7' // 已取消
+  | '8' // 已评价
+  | '10'; // 配餐中-餐厅确认配餐中
+
+export const ORDER_STATUS_LABEL: Record<string, string> = {
+  '1': '待支付',
+  '2': '已支付，配餐中',
+  '4': '配送中',
+  '6': '已完成',
+  '7': '已取消',
+  '8': '已评价',
+  '10': '配餐中（餐厅确认中）',
+};
+
+export interface OrderProduct {
+  productName: string;
+  quantity: number;
+  /** 原价，单位「元」（注意与 calculate-price 的「分」不同） */
+  price: string;
+  comboItemList?: Array<{ itemName: string; itemQuantity: number }>;
+}
+
+export interface OrderDetail {
+  orderId: string;
+  orderStatus: string;
+  /** 取餐码 */
+  pickupCode?: string;
+  /** 取餐柜密码 */
+  lockerCode?: string;
+  /** 取餐柜二维码 URL —— 不是支付码 */
+  lockerQrCode?: string;
+  storeName?: string;
+  storeAddress?: string;
+  takeWay?: string;
+  totalAmount?: string;
+  realTotalAmount?: string;
+  totalDiscountAmount?: string;
+  productPrice?: string;
+  /** 过期支付时间 */
+  expirePayTime?: string;
+  createTime?: string;
+  orderProductList?: OrderProduct[];
+  couponList?: Array<{ couponName: string; discountAmount: string }>;
+}
+
+/** create-order / query-order 的 data 部分 */
+export interface OrderResult {
+  orderId: string;
+  payId?: string;
+  /** 支付 h5 链接（可编码为二维码） */
+  payH5Url?: string;
+  orderDetail?: OrderDetail;
+}

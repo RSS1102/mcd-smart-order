@@ -17,6 +17,14 @@ import { compileOrder, renderResult } from './compiler.js';
 import { applyHardFilters, buildMealViews, defaultConstraints, extractConstraints, scanSubItems } from './constraints.js';
 import { MACRO_PRESETS, buildNutritionIndex, matchNutrition, planNutrition } from './nutrition.js';
 import { checkBusinessHours, checkReservationSlot, pickStore, planPickup, renderPickupPlan } from './pickup.js';
+import {
+  checkPayment,
+  createOrderGuarded,
+  extractPayInfo,
+  preflight,
+  renderConfirmSheet,
+  renderPayGuide,
+} from './order.js';
 import { McdError } from './errors.js';
 import type { BeType } from './types.js';
 import type { MacroPresetName } from './constraints.js';
@@ -220,8 +228,99 @@ async function main(): Promise<void> {
     return;
   }
 
+  if (cmd === 'order') {
+    // 下单与支付。安全设计：默认 dry-run（不发送请求），
+    // 要真下单必须同时传 --yes 与 --confirm，两道闸都过才发送。
+    const productCode = arg('code');
+    const quantity = Number(arg('qty', '1'));
+    if (!productCode) {
+      console.error('用法：order --code <productCode> [--qty 1] [--dry-run] [--yes --confirm]');
+      console.error('     order --check <orderId>     # 查询支付结果');
+      console.error('     order --qr                  # 支付链接以二维码形式输出（默认开启）');
+      process.exit(1);
+    }
+
+    const checkId = arg('check');
+    if (checkId) {
+      const r = await checkPayment(client, checkId);
+      console.log(r.message);
+      if (r.cancelled) console.log('如需重新下单，请说明具体餐品。');
+      return;
+    }
+
+    const { store } = await resolveStore(client);
+    const channel = { storeCode: store.storeCode, orderType: 1 as const, beType: 1 as const };
+    const items = [{ productCode, quantity }];
+
+    // ① 算价拿基准
+    const price = await client.calculatePrice({ ...channel, items });
+    const takeWay = price.takeWayList?.[0];
+    if (!takeWay) {
+      console.error('算价未返回 takeWayList，无法确定取餐方式。');
+      process.exit(1);
+    }
+
+    // 取真实餐品名（确认单必须让用户看得懂，不能只给 code）
+    let productName = productCode;
+    try {
+      const menu = await client.queryMeals(channel);
+      productName = menu.meals[productCode]?.name ?? productCode;
+    } catch {
+      /* 菜单查不到就退回 code */
+    }
+
+    const totalYuan = price.price / 100;
+    const sheet = {
+      storeName: store.storeName,
+      storeCode: store.storeCode,
+      channelLabel: `到店自取 · ${takeWay.title}`,
+      lines: [{ name: productName, quantity, unitPrice: totalYuan / quantity }],
+      total: totalYuan,
+      priceNote: `价格来源：calculate-price（${new Date().toLocaleTimeString('zh-CN')}）`,
+    };
+    console.log(renderConfirmSheet(sheet));
+    console.log();
+
+    // ② 下单前复核
+    const pf = await preflight(client, channel, items, price.price);
+    if (pf.warnings.length) for (const w of pf.warnings) console.log(`⚠️ ${w}`);
+    if (!pf.ok) {
+      console.error('❌ 下单前复核未通过：');
+      for (const b of pf.blockers) console.error(`   - ${b}`);
+      process.exit(1);
+    }
+    console.log('✅ 价格与库存复核通过\n');
+
+    // ③ 创建订单（默认 dry-run）
+    const dryRun = !has('yes');
+    const outcome = await createOrderGuarded(
+      client,
+      store.storeCode,
+      { ...channel, items, takeWayCode: takeWay.code },
+      { dryRun, confirmed: has('confirm') },
+    );
+
+    if (outcome.reused) {
+      console.log(`♻️ 该组合已创建过订单 ${outcome.result?.orderId}，复用而不重复下单。\n`);
+    }
+    if (outcome.requestPreview) {
+      console.log('🧪 dry-run：以下参数已构造完成但未发送');
+      console.log(JSON.stringify(outcome.requestPreview, null, 1));
+      console.log('\n确认无误后加 --yes --confirm 才会真正下单（会产生真实订单）。');
+      return;
+    }
+
+    if (outcome.result) {
+      const pay = extractPayInfo(outcome.result);
+      console.log(renderPayGuide(pay, { qr: !has('no-qr') }));
+      const locker = outcome.result.orderDetail?.lockerQrCode;
+      if (locker) console.log(`\n取餐柜二维码（不是支付码）：${locker}`);
+    }
+    return;
+  }
+
   console.log(`未知命令：${cmd}
-可用命令：menu / compile / nutrition / pickup / delivery`);
+可用命令：menu / compile / nutrition / pickup / delivery / order`);
 }
 
 function nowHm(): string {

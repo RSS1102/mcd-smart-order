@@ -49,13 +49,54 @@
 > 做 22 项参数校验单测（到店缺 `takeWayCode`、外送缺 `addressId`、团餐缺 `gmServiceCode`、
 > 特调缺 `key`、`remark` 超长等），在发起请求前拦掉参数错误。
 
-### 2.2 兼容但未在本版本启用
+### 2.2 create-order 的输出结构（来自 outputSchema）
 
-`delivery-create-address`、`query-meal-assistance`、`query-promotions`、`available-coupons`、
-`auto-bind-coupons`、`query-my-coupons`、`query-my-account`、`campaign-calendar`、`mall-*`（积分商城）。
+`create-order` 与 `query-order` 共用同一套 `data` 结构，字段已通过 `tools/list` 的
+`outputSchema` 确认，可直接依赖：
 
-外送（`beType=2/6`）的**查询链路已实跑验证**，`create-order` 对到店/外送/团餐三种场景的
-参数校验也已覆盖，仅「真实下单」因涉及扣款未执行。
+| 字段 | 说明 |
+|:---|:---|
+| `data.orderId` | 订单 id |
+| `data.payId` | 支付 id |
+| `data.payH5Url` | **支付 h5 链接** —— 可编码为二维码供扫码支付 |
+| `data.orderDetail.orderStatus` | `1` 待支付 / `2` 配餐中-已支付 / `4` 配送中 / `6` 已完成 / `7` 已取消 / `8` 已评价 / `10` 配餐中-餐厅确认中 |
+| `data.orderDetail.expirePayTime` | 支付截止时间，超时订单自动取消 |
+| `data.orderDetail.pickupCode` | 取餐码 |
+| `data.orderDetail.lockerCode` / `lockerQrCode` | 取餐柜密码 / 取餐柜二维码（**非支付码**） |
+| `data.orderDetail.realTotalAmount` | 实付金额，**单位「元」** |
+| `data.orderDetail.totalDiscountAmount` | 总优惠金额 |
+| `data.orderDetail.couponList[].{couponName,discountAmount}` | 实际使用的券与优惠额 |
+| `data.orderDetail.deliveryInfo` | 外送配送信息（收件人 / 骑士 / 预计送达） |
+
+> ⚠️ 单位不一致：`calculate-price.price` 是**分**，`orderDetail` 里全是**元**字符串。
+
+### 2.3 工具清单规模
+
+`tools/list` 实际返回 **35 个工具**（本项目代码内记录的是其中 21 个）。除本 Skill 用到的
+10 个外，其余按域分组：
+
+| 域 | 工具 |
+|:---|:---|
+| 订单管理 | `cancel-order`（`orderId` + `cancelReasonCode`）、`order-list` |
+| 优惠券 | `query-store-coupons`、`available-coupons`、`auto-bind-coupons`、`query-my-coupons`、`query-survey-coupon` |
+| 账户 | `query-my-account` |
+| 外送 | `delivery-create-address` |
+| 团餐 / 活动 | `query-meal-assistance`、`query-promotions`、`campaign-calendar`、`party-*`（5 个） |
+| 积分商城 | `mall-*`（4 个）、`draw-lottery`、`query-lottery-info`、`query-my-prizes` |
+
+**本版本未启用**的部分（优惠券、积分、派对、团餐）：`query-promotions`、
+`available-coupons`、`auto-bind-coupons`、`query-my-coupons`、`query-my-account`、
+`campaign-calendar`、`mall-*`、`party-*`、`draw-lottery`、`query-lottery-info`、
+`query-my-prizes`、`query-survey-coupon`、`delivery-create-address`、`query-meal-assistance`。
+
+### 2.4 真实下单的验证边界
+
+外送（`beType=2/6`）的**查询链路已实跑验证**。`create-order`：
+
+- 参数校验：**22 项单测**覆盖（到店/外送/团餐三种场景 + 特调 key + `roundList` 结构）。
+- 下单流程：**17 项单测**覆盖（确认单、价格复核、幂等、dry-run、二维码、支付状态映射）。
+- **真实下单未执行** —— 会产生真实订单与扣款。CLI 的 `order` 命令默认 dry-run，
+  只有 `--yes --confirm` 双闸同过才发送请求，便于在有真实需求时自测。
 
 ---
 
