@@ -58,7 +58,7 @@
 |:---|:---|
 | `data.orderId` | 订单 id |
 | `data.payId` | 支付 id |
-| `data.payH5Url` | **支付 h5 链接** —— 可编码为二维码供扫码支付 |
+| `data.payH5Url` | **扫码引导页**（不是支付页）—— 打开后还会再显示二维码让麦当劳 APP 扫，为「电脑打开、手机扫」设计。手机端应直接引导用户去 APP 内支付 |
 | `data.orderDetail.orderStatus` | `1` 待支付 / `2` 配餐中-已支付 / `4` 配送中 / `6` 已完成 / `7` 已取消 / `8` 已评价 / `10` 配餐中-餐厅确认中 |
 | `data.orderDetail.expirePayTime` | 支付截止时间，超时订单自动取消 |
 | `data.orderDetail.pickupCode` | 取餐码 |

@@ -291,29 +291,37 @@ export function extractPayInfo(result: OrderResult): PayInfo {
   };
 }
 
-/** 渲染支付指引（含二维码） */
-export function renderPayGuide(p: PayInfo, opts: { qr?: boolean } = {}): string {
+/**
+ * 渲染支付指引。
+ *
+ * ⚠️ **`payH5Url` 不是支付页，是「扫码引导页」。**
+ * 实测 `https://m.mcd.cn/mcp/scanToPay?orderId=...` 打开后还会再显示一个二维码，
+ * 让你用麦当劳 APP 扫 —— 它是给「电脑上打开、手机扫」的场景设计的。
+ * 如果用户在**手机上**扫我们给的二维码，就会看到「又一个二维码」，形成套娃，
+ * 永远付不掉。
+ *
+ * 因此：
+ *   · 默认主路径 = 引导用户去麦当劳 APP 内支付（唯一能真正完成支付的地方）
+ *   · `desktopQr` 仅在明确知道用户在电脑前时才给（配合 h5 链接）
+ */
+export function renderPayGuide(p: PayInfo, opts: { desktopQr?: boolean } = {}): string {
   const out: string[] = [];
   out.push('💳 订单已创建，请完成支付');
   out.push(`订单号：${p.orderId}`);
   if (p.amount) out.push(`应付金额：¥${p.amount}`);
   if (p.expirePayTime) out.push(`支付截止：${p.expirePayTime}（超时订单会自动取消）`);
   out.push('');
+  out.push('📱 请在麦当劳 APP 内完成支付：');
+  out.push('   打开麦当劳 APP → 底部「订单」→ 找到本单 → 立即支付');
+  out.push('');
 
-  if (!p.payH5Url) {
-    out.push('⚠️ 本次返回未包含支付链接，请打开麦当劳 APP 在「订单」中完成支付。');
-    return out.join('\n');
+  if (opts.desktopQr && p.payH5Url) {
+    out.push('如果你在电脑上操作，也可以打开下面的链接，页面会显示二维码，用手机 APP 扫：');
+    out.push(p.payH5Url);
+  } else if (p.payH5Url) {
+    out.push('⚠️ 不要用手机直接打开支付链接——那是一个中转页，会再让你扫一次码。');
   }
 
-  if (opts.qr) {
-    out.push('请用手机扫描下方二维码，或直接打开链接：');
-    out.push('');
-    out.push(renderQrToTerminal(p.payH5Url));
-    out.push('');
-  } else {
-    out.push('请在手机打开以下链接完成支付：');
-  }
-  out.push(p.payH5Url);
   out.push('');
   out.push('支付完成后回复「支付完成」，我会帮你核实订单状态。');
   return out.join('\n');

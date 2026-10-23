@@ -334,7 +334,7 @@ async function main(): Promise<void> {
 
     if (outcome.result) {
       const pay = extractPayInfo(outcome.result);
-      console.log(renderPayGuide(pay, { qr: !has('no-qr') }));
+      console.log(renderPayGuide(pay, { desktopQr: has('desktop') }));
       const locker = outcome.result.orderDetail?.lockerQrCode;
       if (locker) console.log(`\n取餐柜二维码（不是支付码）：${locker}`);
 

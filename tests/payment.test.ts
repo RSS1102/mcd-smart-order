@@ -159,10 +159,18 @@ describe('支付信息提取与二维码', () => {
     expect(qr).not.toMatch(/\x1b\[/);
   });
 
-  it('无 payH5Url 时给出 APP 内支付的降级指引，而不是空白', () => {
-    const text = renderPayGuide({ orderId: 'ORD1' }, { qr: true });
-    expect(text).toContain('未包含支付链接');
+  it('主路径必须是「去 APP 支付」，不是让用户扫 h5 的码', () => {
+    const text = renderPayGuide({ orderId: 'ORD1', payH5Url: 'https://m.mcd.cn/mcp/scanToPay?orderId=ORD1' });
     expect(text).toContain('麦当劳 APP');
+    expect(text).toContain('订单');
+    // 手机直接打开 h5 会二次跳转（套娃），必须明确警告
+    expect(text).toContain('中转页');
+  });
+
+  it('桌面场景才给 h5 链接', () => {
+    const url = 'https://m.mcd.cn/mcp/scanToPay?orderId=ORD1';
+    expect(renderPayGuide({ orderId: 'ORD1', payH5Url: url }, { desktopQr: true })).toContain(url);
+    expect(renderPayGuide({ orderId: 'ORD1', payH5Url: url })).not.toContain(url);
   });
 });
 
