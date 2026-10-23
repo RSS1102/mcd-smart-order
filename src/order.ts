@@ -13,7 +13,7 @@
 import qrcode from 'qrcode-terminal';
 import type { McdClient } from './mcp-client.js';
 import { McdError } from './errors.js';
-import type { ChannelParams, OrderItemInput, OrderResult, PriceResult } from './types.js';
+import type { ChannelParams, OrderDetail, OrderItemInput, OrderResult, PriceResult } from './types.js';
 import { ORDER_STATUS_LABEL } from './types.js';
 
 /* ------------------------------------------------------------------ */
@@ -301,6 +301,25 @@ export function renderPayGuide(p: PayInfo, opts: { qr?: boolean } = {}): string 
 /* 5. 支付结果查询                                                       */
 /* ------------------------------------------------------------------ */
 
+/**
+ * 归一化订单状态。
+ *
+ * ⚠️ `outputSchema` 声明 `orderStatus` 是 `"1" | "2" | ...` 数字字符串，
+ * 但**真实返回是中文标签**（实测 `"待支付"`）。
+ * 两种都要兼容，否则 `pending` 会被判成 false，用户说「付完了」时
+ * Agent 会误以为订单处于未知状态。
+ */
+function normalizeStatus(raw: string): 'pending' | 'paid' | 'cancelled' | 'unknown' {
+  const s = (raw ?? '').trim();
+  if (s === '1' || s.includes('待支付') || s.includes('未支付')) return 'pending';
+  if (s === '7' || s.includes('取消')) return 'cancelled';
+  if (['2', '4', '6', '8', '10'].includes(s)) return 'paid';
+  if (s.includes('配餐') || s.includes('制作') || s.includes('配送') || s.includes('完成') || s.includes('已支付')) {
+    return 'paid';
+  }
+  return 'unknown';
+}
+
 export interface PayCheckResult {
   orderId: string;
   status: string;
@@ -323,11 +342,20 @@ export interface PayCheckResult {
  */
 export async function checkPayment(client: McdClient, orderId: string): Promise<PayCheckResult> {
   const raw = (await client.queryOrder(orderId)) as OrderResult;
-  const detail = raw.orderDetail;
-  const status = detail?.orderStatus ?? '';
-  const paid = ['2', '4', '6', '8', '10'].includes(status);
-  const cancelled = status === '7';
-  const pending = status === '1';
+
+  // ⚠️ 两个接口的返回结构不同：
+  //   create-order → data.orderDetail.{orderStatus, pickupCode, ...}
+  //   query-order  → data.{orderStatus, pickupCode, ...}（**没有 orderDetail 包裹**）
+  // 实测 query-order 传 orderDetail 会拿到空，status 变「未知」。
+  const detail: OrderDetail = (raw.orderDetail ?? (raw as unknown as OrderDetail)) ?? ({} as OrderDetail);
+
+  // ⚠️ 以 `orderStatus`（中文标签）为准。同一响应里的 `status: "10"` 语义与
+  // outputSchema 的「10=配餐中」矛盾（实际订单是待支付），数字字段不可靠。
+  const status = detail.orderStatus ?? '';
+  const kind = normalizeStatus(status);
+  const paid = kind === 'paid';
+  const cancelled = kind === 'cancelled';
+  const pending = kind === 'pending';
 
   let message: string;
   if (paid) {
@@ -342,7 +370,7 @@ export async function checkPayment(client: McdClient, orderId: string): Promise<
   } else if (pending) {
     message = '⏳ 订单仍为「待支付」。请在支付页完成付款后再回复「支付完成」，我暂时不会重复创建订单。';
   } else {
-    message = `订单状态：${ORDER_STATUS_LABEL[status] ?? (status || '未知')}，请稍后再查。`;
+    message = `订单状态：「${status || '未知'}」，请稍后再查或到 APP 内查看。`;
   }
 
   return {

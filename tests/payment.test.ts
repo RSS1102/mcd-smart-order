@@ -196,3 +196,60 @@ describe('支付结果核实', () => {
     expect(r.cancelled).toBe(false);
   });
 });
+
+describe('订单状态：数字码与中文标签都要兼容', () => {
+  const mk = (status: string): McdClient =>
+    fakeClient({ orderResult: { orderId: 'ORD1', orderDetail: { orderId: 'ORD1', orderStatus: status, pickupCode: 'P1' } } });
+
+  it('实测返回的中文「待支付」必须识别为 pending', async () => {
+    // outputSchema 写的是 "1"，真实返回是「待支付」。若只认数字，
+    // pending=false，用户说「付完了」时会被当成未知状态
+    const r = await checkPayment(mk('待支付'), 'ORD1');
+    expect(r.pending).toBe(true);
+    expect(r.paid).toBe(false);
+    expect(r.message).toContain('不会重复创建订单');
+  });
+
+  it('中文「配餐中」识别为已支付', async () => {
+    const r = await checkPayment(mk('配餐中'), 'ORD1');
+    expect(r.paid).toBe(true);
+  });
+
+  it('中文「已取消」识别为取消', async () => {
+    const r = await checkPayment(mk('已取消'), 'ORD1');
+    expect(r.cancelled).toBe(true);
+  });
+
+  it('数字码仍然兼容', async () => {
+    expect((await checkPayment(mk('1'), 'ORD1')).pending).toBe(true);
+    expect((await checkPayment(mk('2'), 'ORD1')).paid).toBe(true);
+    expect((await checkPayment(mk('7'), 'ORD1')).cancelled).toBe(true);
+  });
+});
+
+describe('query-order 返回结构：详情在顶层而非 orderDetail', () => {
+  it('顶层直接给 orderStatus 时也能识别（实测结构）', async () => {
+    // create-order 是 data.orderDetail.{...}，query-order 是 data.{...}
+    // 只读 orderDetail 会拿到空，状态变「未知」
+    const flat = {
+      orderId: 'ORD1',
+      orderStatus: '待支付',
+      status: '10',
+      pickupCode: '',
+      storeName: 'X店',
+    } as unknown as OrderResult;
+    const c = { queryOrder: async () => flat } as unknown as McdClient;
+    const r = await checkPayment(c, 'ORD1');
+    expect(r.status).toBe('待支付');
+    expect(r.pending).toBe(true);
+  });
+
+  it('同一响应里 status="10" 不可靠，应以 orderStatus 为准', async () => {
+    // outputSchema 说 10 = 配餐中，但实际订单是待支付
+    const flat = { orderId: 'ORD1', orderStatus: '待支付', status: '10' } as unknown as OrderResult;
+    const c = { queryOrder: async () => flat } as unknown as McdClient;
+    const r = await checkPayment(c, 'ORD1');
+    expect(r.paid, '不能被 status="10" 误判为已支付').toBe(false);
+    expect(r.pending).toBe(true);
+  });
+});
