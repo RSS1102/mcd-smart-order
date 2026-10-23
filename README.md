@@ -44,10 +44,19 @@ WorkBuddy 左侧栏「**专家 · 技能 · 连接器**」→「连接器」→ 
 
 ### 3. 安装 Skill
 
+本 Skill 不在 WorkBuddy 技能市场里，需要自己导入。**两种方式选一种**，效果相同：
+
+**方式 A：手动放置（最直接，开发者常用）**
+
 ```bash
 git clone --depth 1 https://github.com/RSS1102/mcd-smart-order.git \
   ~/.workbuddy/skills/mcd-smart-order
 ```
+
+**方式 B：界面上传**
+
+左侧边栏「**专家 · 技能 · 连接器**」→「**技能**」页签 →「**添加技能**」→「**上传技能**」
+→ 选择技能包（可用 `npm run pack:skill` 生成 `build/mcd-smart-order-skill.zip`）。
 
 装好后的最小结构：
 
@@ -56,7 +65,10 @@ git clone --depth 1 https://github.com/RSS1102/mcd-smart-order.git \
 └── SKILL.md          # 必需：Skill 描述与工作流规则
 ```
 
-> 💡 **只拷一个 `SKILL.md` 过去也够用。** Skill 的规则全在这份文件里，Agent 会按它
+> ✅ **装完要做一次确认**：回到「技能 → 已安装」，能看到 `mcd-smart-order`
+> 且处于**启用**状态。已关闭的技能不参与模型调用，对话里问它也不会响应。
+>
+> 💡 **只拷一个 `SKILL.md` 过去就够用。** Skill 的规则全在这份文件里，Agent 会按它
 > 直接调 MCP 工具完成任务，**不需要跑本项目任何代码**。
 > `src/` 是可选的参考实现，用于精确的组合求解与回归验证（见下一节）。
 

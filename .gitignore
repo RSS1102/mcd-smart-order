@@ -14,3 +14,6 @@ mcp.json
 # 支付二维码图片含真实订单号，不入库
 pay-*.png
 pay-*.svg
+
+# 技能打包产物
+build/

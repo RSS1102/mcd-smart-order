@@ -13,7 +13,9 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
-    "cli": "npm run build && node dist/src/cli.js"
+    "cli": "npm run build && node dist/src/cli.js",
+    "pack:skill": "node scripts/pack-skill.mjs",
+    "pack:skill:full": "node scripts/pack-skill.mjs --full"
   },
   "devDependencies": {
     "@types/node": "^22.20.5",
