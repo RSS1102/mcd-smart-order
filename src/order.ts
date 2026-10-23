@@ -10,7 +10,8 @@
  *   4. **支付结果只信接口** —— 用户口述不作为凭证，必须 query-order 验。
  */
 
-import qrcode from 'qrcode-terminal';
+import qrcodeTerminal from 'qrcode-terminal';
+import qrcode from 'qrcode';
 import type { McdClient } from './mcp-client.js';
 import { McdError } from './errors.js';
 import type { ChannelParams, OrderDetail, OrderItemInput, OrderResult, PriceResult } from './types.js';
@@ -241,14 +242,35 @@ export function __resetOrderCache(): void {
  * 固定用 `small: true` —— 纯块字符、无 ANSI 反色。
  * 默认模式下 qrcode-terminal 会输出 `\x1b[47m` 之类反色码，
  * 一旦输出被重定向到文件/日志或不被终端解析，就会显示成 `[0m` 乱码。
+ *
+ * ⚠️ **仅用于终端兜底。** 块字符依赖等宽字体与行高，在聊天窗口、
+ * 网页日志、非等宽环境里极易变形而扫不出来。能出图片时优先用
+ * `renderQrToFile` 生成 PNG/SVG。
  */
 export function renderQrToTerminal(url: string): string {
   let out = '';
-  qrcode.generate(url, { small: true }, (qr: string) => {
+  qrcodeTerminal.generate(url, { small: true }, (qr: string) => {
     out = qr;
   });
   // 兜底清理：万一库版本变更带出 ANSI，也不要污染输出
   return out.replace(/\x1b\[[0-9;]*m/g, '');
+}
+
+/**
+ * 生成二维码**图片文件**（PNG 或 SVG）。这是给人扫的可靠形式。
+ *
+ * @param url     支付链接
+ * @param outPath 输出路径，扩展名决定格式（.png / .svg）
+ * @param width   像素宽度，默认 480（手机扫码足够，且不会被压缩糊）
+ */
+export async function renderQrToFile(url: string, outPath: string, width = 480): Promise<string> {
+  await qrcode.toFile(outPath, url, {
+    width,
+    margin: 2,
+    errorCorrectionLevel: 'M',
+    color: { dark: '#000000', light: '#FFFFFF' },
+  });
+  return outPath;
 }
 
 export interface PayInfo {

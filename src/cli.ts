@@ -24,6 +24,7 @@ import {
   preflight,
   renderConfirmSheet,
   renderPayGuide,
+  renderQrToFile,
 } from './order.js';
 import { McdError } from './errors.js';
 import type { BeType, Nutrition } from './types.js';
@@ -336,6 +337,17 @@ async function main(): Promise<void> {
       console.log(renderPayGuide(pay, { qr: !has('no-qr') }));
       const locker = outcome.result.orderDetail?.lockerQrCode;
       if (locker) console.log(`\n取餐柜二维码（不是支付码）：${locker}`);
+
+      // 图片二维码才是能可靠扫的形式；默认落盘，--no-qr-file 可关。
+      if (pay.payH5Url && !has('no-qr-file')) {
+        const out = arg('qr-file', `./pay-${pay.orderId}.png`)!;
+        try {
+          await renderQrToFile(pay.payH5Url, out, 480);
+          console.log(`\n🖼️ 二维码图片已保存：${out}（用手机相机扫这张，不要扫终端字符）`);
+        } catch (e) {
+          console.log(`\n⚠️ 二维码图片保存失败（${(e as Error).message}），请直接用上面的链接。`);
+        }
+      }
     }
     return;
   }

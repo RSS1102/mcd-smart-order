@@ -253,3 +253,24 @@ describe('query-order 返回结构：详情在顶层而非 orderDetail', () => {
     expect(r.pending).toBe(true);
   });
 });
+
+describe('二维码图片输出（能扫的形式）', () => {
+  it('生成 PNG 且文件非空、落在指定路径', async () => {
+    const { renderQrToFile } = await import('../src/order.js');
+    const out = '/tmp/mcd-qr-test.png';
+    const p = await renderQrToFile('https://m.mcd.cn/mcp/scanToPay?orderId=TEST123', out, 240);
+    expect(p).toBe(out);
+    const { statSync } = await import('node:fs');
+    expect(statSync(out).size).toBeGreaterThan(300);
+  });
+
+  it('支持 SVG 输出', async () => {
+    const { renderQrToFile } = await import('../src/order.js');
+    const out = '/tmp/mcd-qr-test.svg';
+    await renderQrToFile('https://m.mcd.cn/mcp/scanToPay?orderId=TEST123', out, 240);
+    const { readFileSync } = await import('node:fs');
+    const svg = readFileSync(out, 'utf-8');
+    expect(svg).toContain('<svg');
+    expect(svg).toContain('path');
+  });
+});

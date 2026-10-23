@@ -10,3 +10,7 @@ mcp.json
 .idea/
 .vscode/
 *.tsbuildinfo
+
+# 支付二维码图片含真实订单号，不入库
+pay-*.png
+pay-*.svg
