@@ -63,6 +63,13 @@ export MCD_MCP_TOKEN="<你的 MCP Token>"
 > **助手**：调用 `query-nearby-stores` 列出附近门店 → 你挑一家
 > 　　　　再原样列出该店的 `reservationTimeOptions` → 你挑一个时段
 
+选完餐品后：
+
+> **助手**：给出订单确认单（门店 / 餐品 / 规格 / 合计 / 热量）
+> **你**：确认下单
+> **助手**：创建订单 → 告知订单号、应付金额、15 分钟支付截止
+> 　　　　→ 引导你去「麦当劳 APP → 订单 → 立即支付」
+
 地址、时间**不是脚本入参**，是 Agent 问出来、你选出来的。完整规则见 [`SKILL.md`](./SKILL.md)。
 
 ### 命令（开发验证用）
@@ -106,6 +113,26 @@ node dist/src/cli.js order --code 515837      # 下单（默认 dry-run，只构
   营养估算：485 kcal ｜ 蛋白 28g / 碳水 46g / 脂肪 21g ｜ 钠 917mg
   理由：预算利用率 100%；较原价省 ¥12.5；套餐已含主食+小食+饮料，无需凑单
 ```
+
+### 下单与支付
+
+选品确认后由 `create-order` 创建订单，**支付在麦当劳 APP 内完成**（Agent 不代付）：
+
+```
+选品 → calculate-price → 订单确认单 → create-order → 麦当劳 APP 支付 → query-order 核实
+```
+
+在麦当劳 APP「我的订单」里看到的结果（实测）：
+
+<img src="./docs/assets/order-in-app.png" width="360" alt="麦当劳 APP 我的订单：麦香鱼、中薯条、可乐，¥46 共3件，到店取餐">
+
+订单创建后会给出 **15 分钟支付窗口**，未支付则自动取消（上图即为验证单，
+超时后状态变为「已取消」，不产生任何扣款）。
+
+> ⚠️ **`payH5Url` 是「扫码引导页」，不是支付页。**
+> 打开后它还会再显示一个二维码让麦当劳 APP 扫 —— 那是为「电脑上打开、手机扫」
+> 设计的。手机端如果扫这个码，会看到「又一个二维码」，形成套娃。
+> 正确做法：**打开麦当劳 APP → 订单 → 找到本单 → 立即支付**。
 
 ### 无解时的替代方案
 
@@ -174,15 +201,19 @@ mcd-smart-order/
 │   ├── errors.ts                  # 错误分类（401/429/400/60006/售罄/时段…）
 │   ├── constraints.ts             # 过敏原·忌口·口味知识库、槽位提取、硬过滤
 │   ├── compiler.ts                # ★ 预算＋偏好编译器（查询计划/搜索/松弛阶梯）
-│   ├── nutrition.ts               # 营养表解析、名称匹配、配比求解
+│   ├── nutrition.ts               # 营养表解析、名称匹配、配比求解、套餐子项加总
 │   ├── pickup.ts                  # 门店选择、营业/预约时段校验、自提流程
-│   ├── cli.ts                     # CLI：menu / compile / nutrition / pickup
+│   ├── order.ts                   # ★ 下单与支付：确认单/复核/幂等/二维码/支付核实
+│   ├── cli.ts                     # CLI：menu / compile / nutrition / pickup / delivery / order
 │   └── index.ts                   # 公共入口
 ├── tests/                         # 143 项单元测试（基于真实门店与菜单快照）
 │   ├── compiler.test.ts  nutrition.test.ts  pickup.test.ts
-│   ├── order.test.ts     helpers.ts
+│   ├── order.test.ts     payment.test.ts    helpers.ts
 ├── fixtures/                      # 真实数据快照（深圳科技园门店，116 个餐品 + 160 条营养）
 │   ├── meals.sample.json  meal-detail.sample.json  nutrition.sample.txt
+├── docs/
+│   ├── VALIDATION_REPORT.md       # 本地验证报告
+│   └── assets/order-in-app.png    # 下单结果截图（麦当劳 APP 我的订单）
 └── examples/                      # 示例对话（含真实 MCP 返回）
     ├── 01-single-order.md  02-pickup.md
     ├── 03-budget-compiler.md  04-nutrition.md
